@@ -1,0 +1,2 @@
+#!/bin/sh
+claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official "$@"

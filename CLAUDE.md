@@ -144,3 +144,7 @@ When you ask to clear the session (e.g., "clear pls", "clear", or similar), run:
 ```
 
 This clears the Ararat remote control session's context.
+
+## Git Permissions
+
+Claude has write access to the repository via a fine-grained GitHub PAT token with "Contents" write permission scoped to this repo only. I can autonomously commit and push changes.

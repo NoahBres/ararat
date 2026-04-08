@@ -120,3 +120,17 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 The `gws-gmail` and `gws-gmail-read` skills in `.claude/skills/` are sourced from https://github.com/googleworkspace/cli
 
 For any ambiguity or issues with Google Workspace tasks (Gmail, Calendar, Drive, etc.), check this repo for additional skills or capabilities that can be pulled in.
+
+---
+
+## Remote Model Switching
+
+The Ararat remote control session can switch between Claude models via the `send-cmd.sh` script:
+
+```sh
+./send-cmd.sh "/model haiku"
+./send-cmd.sh "/model sonnet"
+./send-cmd.sh "/model opus"
+```
+
+The script sends commands via dtach to the socket at `/tmp/ararat.sock` (the same session that handles Telegram messages). Claude can execute these commands autonomously to switch its own model during a conversation.

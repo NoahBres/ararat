@@ -1,5 +1,11 @@
 # Project Notes
 
+## Local TODO
+
+There's a local `TODO.md` file in the repo for quick task tracking with Backlog, In Progress, and Done sections.
+
+---
+
 ## Things 3
 
 ### Reading todos (via `uvx things-cli`)
@@ -144,6 +150,16 @@ When you ask to clear the session (e.g., "clear pls", "clear", or similar), run:
 ```
 
 This clears the Ararat remote control session's context.
+
+## Restarting Ararat
+
+When asked to restart (e.g., "restart", "restart yourself", "restart ararat"), run:
+
+```sh
+systemctl --user restart ararat.service
+```
+
+This restarts the Ararat Telegram bot systemd user service. Note: restarting will terminate the current session, so this should be the last action taken.
 
 ## Git Permissions
 

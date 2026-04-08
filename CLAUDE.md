@@ -1,5 +1,7 @@
 # Project Notes
 
+> **Note for Claude**: macOS-specific instructions (Things 3, etc.) are in `claude-macos.md`. Only read that file if running on macOS.
+
 ## Telegram UX — Long-Running Tasks
 
 When starting a long-running task (e.g., git operations, API calls, multi-step work), send a Telegram message via the `reply` tool first to acknowledge the request and let the user know work is underway. The user interacts through Telegram and cannot see intermediate tool output, so silence looks like a disappeared bot.
@@ -9,60 +11,6 @@ When starting a long-running task (e.g., git operations, API calls, multi-step w
 ## Local TODO
 
 There's a local `TODO.md` file in the repo for quick task tracking with Backlog, In Progress, and Done sections.
-
----
-
-## Things 3
-
-### Reading todos (via `uvx things-cli`)
-```sh
-uvx things-cli today          # today's tasks
-uvx things-cli inbox          # inbox
-uvx things-cli todos          # all todos
-uvx things-cli anytime        # anytime list
-uvx things-cli someday        # someday list
-uvx things-cli projects       # all projects
-uvx things-cli search "query" # search
-
-# Filters
-uvx things-cli -p "Project Name" todos   # filter by project
-uvx things-cli -a "Area Name" todos      # filter by area
-uvx things-cli -t "tag" todos            # filter by tag
-
-# Output formats
-uvx things-cli --json today              # JSON output
-uvx things-cli --csv --recursive all     # CSV with nesting
-uvx things-cli --recursive areas         # nested tree view
-```
-
-### Writing todos (via URL scheme)
-```sh
-# Add to inbox
-open "things:///add?title=My%20Todo"
-
-# Add to today
-open "things:///add?title=My%20Todo&when=today"
-
-# Add with notes, deadline, tags
-open "things:///add?title=My%20Todo&when=today&notes=Some%20notes&deadline=2026-04-01&tags=work"
-
-# Add to a specific list/project
-open "things:///add?title=My%20Todo&list=Project%20Name"
-
-# Add to someday
-open "things:///add?title=My%20Todo&when=someday"
-
-# Create a project
-open "things:///add-project?title=My%20Project&when=today"
-
-# Navigate to a view
-open "things:///show?id=today"
-open "things:///show?id=inbox"
-```
-
-`when` accepts: `today`, `tomorrow`, `someday`, `anytime`, or a date like `2026-04-01`.
-
-For **updating** existing todos, Things 3 requires an auth token (Settings > General > Enable Things URLs).
 
 ---
 
@@ -170,3 +118,9 @@ This restarts the Ararat Telegram bot systemd user service. Note: restarting wil
 ## Git Permissions
 
 Claude has write access to the repository via a fine-grained GitHub PAT token with "Contents" write permission scoped to this repo only. I can autonomously commit and push changes.
+
+### Commit Strategy
+
+When asked to commit and push, split unstaged changes into **atomic commits by subject/change**. Each commit should represent a single logical unit of work. Then push all commits together.
+
+Example: If changes span 3 different features/fixes, create 3 separate commits with clear, focused messages — then push all of them.

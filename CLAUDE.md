@@ -134,3 +134,13 @@ The Ararat remote control session can switch between Claude models via the `send
 ```
 
 The script sends commands via dtach to the socket at `/tmp/ararat.sock` (the same session that handles Telegram messages). Claude can execute these commands autonomously to switch its own model during a conversation.
+
+## Session Clearing
+
+When you ask to clear the session (e.g., "clear pls", "clear", or similar), run:
+
+```sh
+./send-cmd.sh "/clear"
+```
+
+This clears the Ararat remote control session's context.

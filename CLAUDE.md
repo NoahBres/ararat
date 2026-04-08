@@ -1,5 +1,11 @@
 # Project Notes
 
+## Telegram UX — Long-Running Tasks
+
+When starting a long-running task (e.g., git operations, API calls, multi-step work), send a Telegram message via the `reply` tool first to acknowledge the request and let the user know work is underway. The user interacts through Telegram and cannot see intermediate tool output, so silence looks like a disappeared bot.
+
+---
+
 ## Local TODO
 
 There's a local `TODO.md` file in the repo for quick task tracking with Backlog, In Progress, and Done sections.

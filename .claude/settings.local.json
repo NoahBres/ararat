@@ -9,5 +9,8 @@
       "Bash(gh api:*)",
       "WebSearch"
     ]
+  },
+  "env": {
+    "ENABLE_EXPERIMENTAL_MCP_CLI": "true"
   }
 }

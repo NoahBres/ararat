@@ -104,6 +104,19 @@ The script loads `OPENAI_API_KEY` from `.env` automatically.
 
 ---
 
+## System Environment
+
+This machine runs **NixOS**. Packages can be brought in temporarily without permanent installation:
+
+```sh
+nix shell nixpkgs#pkg          # Single package
+nix shell nixpkgs#pkg1 nixpkgs#pkg2  # Multiple packages
+```
+
+These are ephemeral — use freely for one-off tools without worrying about cleanup.
+
+---
+
 ## Service Management
 
 ```sh

@@ -2,9 +2,38 @@
 
 > **Note for Claude**: macOS-specific instructions (Things 3, etc.) are in `claude-macos.md`. Only read that file if running on macOS.
 
-## Telegram UX — Long-Running Tasks
+---
 
-When starting a long-running task (e.g., git operations, API calls, multi-step work), send a Telegram message via the `reply` tool first to acknowledge the request and let the user know work is underway. The user interacts through Telegram and cannot see intermediate tool output, so silence looks like a disappeared bot.
+## Primary Role
+
+**Your primary goal in this project is to be a helpful chat assistant**, communicating with the user primarily via Telegram through the Ararat channel.
+
+### Model Switching Strategy
+
+You can switch between Claude models dynamically. Here's the strategy:
+
+- **Default to Haiku** — Use for all regular chat and straightforward tasks (cost-efficient)
+- **Switch to Sonnet** — Default choice for research, investigations, planning, and complex problem-solving
+- **Switch to Opus** — Only when the user explicitly asks for it; reserved for the hardest tasks
+
+**Auto-switching**: When you recognize that a task requires more capability than Haiku (research, investigations, planning), automatically switch to Sonnet, complete the work, and switch back to Haiku. Do NOT auto-switch to Opus—only use Opus if the user explicitly requests it.
+
+To switch models, use `send-cmd.sh` (sends commands via dtach to `/tmp/ararat.sock`):
+```sh
+./send-cmd.sh "/model haiku"    # Default
+./send-cmd.sh "/model sonnet"   # Medium complexity
+./send-cmd.sh "/model opus"     # Complex planning
+```
+
+---
+
+## Telegram Communication
+
+**Critical: The user can only see Telegram messages.** They cannot see your internal tool output, thinking, research, or brainstorming. If you don't send a Telegram message, they don't know what you're doing.
+
+**Rule:** For any non-trivial task (research, git ops, API calls, multi-step work), send an immediate acknowledgement via the `reply` tool before starting work. When complete, send findings immediately.
+
+**Why:** Silence looks like you've disappeared, even if you're actively working.
 
 ---
 
@@ -14,90 +43,17 @@ There's a local `TODO.md` file in the repo for quick task tracking with Backlog,
 
 ---
 
-## 1Password CLI
+## Google Workspace
 
-Credentials are stored in 1Password and accessible via `op` CLI (already authenticated in shell).
-
-```sh
-# List items by category
-op item list --categories "SSH Key" --format json
-op item list --categories "API Credential" --format json
-
-# Get an item's fields (use --reveal for hidden values)
-op item get "Item Name" --reveal --format json
-
-# Extract a specific field value
-op item get "Item Name" --reveal --fields label=credential
-```
-
-### Known items
-- **`Hetzner - Default - API Token`** — Hetzner Cloud API token (field: `credential`)
-- **`Hetzner`** (SSH Key category) — SSH key pair used for Hetzner servers (fields: `public key`, `private key`, `fingerprint`)
-
-To use the SSH private key, write it to a temp file:
-```sh
-op item get "Hetzner" --reveal --format json | python3 -c "
-import sys, json, stat, os
-data = json.load(sys.stdin)
-key = next(f['value'] for f in data['fields'] if f['label'] == 'private key')
-with open('/tmp/hetzner_key', 'w') as f: f.write(key + '\n')
-os.chmod('/tmp/hetzner_key', stat.S_IRUSR | stat.S_IWUSR)
-print('Key written to /tmp/hetzner_key')
-"
-ssh -i /tmp/hetzner_key root@<host>
-```
+- **Gmail**: Use `gws-gmail` / `gws-gmail-read` skills
+- **Calendar**: Use the Google Calendar MCP tools (already loaded); authenticate with `mcp__claude_ai_Google_Calendar__authenticate` if needed
+- For other Google Workspace tasks (Drive, Docs, etc.), check https://github.com/googleworkspace/cli for additional skills
 
 ---
-
-## Hetzner Cloud API
-
-API token lives in 1Password as `Hetzner - Default - API Token`. Base URL: `https://api.hetzner.cloud/v1`
-
-```sh
-TOKEN=$(op item get "Hetzner - Default - API Token" --reveal --format json | python3 -c "import sys,json; data=json.load(sys.stdin); print(next(f['value'] for f in data['fields'] if f.get('value') and len(f['value']) > 10))")
-
-# List servers
-curl -s -H "Authorization: Bearer $TOKEN" https://api.hetzner.cloud/v1/servers
-
-# List SSH keys
-curl -s -H "Authorization: Bearer $TOKEN" https://api.hetzner.cloud/v1/ssh_keys
-
-# Rebuild server with cloud-init (wipes disk)
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"image": "ubuntu-24.04", "user_data": "<cloud-init yaml>"}' \
-  https://api.hetzner.cloud/v1/servers/{id}/actions/rebuild
-```
-
-**Notes:**
-- Assigning/removing Primary IPs requires the server to be **powered off**
-- New servers default to IPv6-only (no IPv4) — add a Primary IP if needed (~€0.50/mo)
-- See `server-provisioning.md` for the full Tailscale bootstrap pattern
-
----
-
-## Google Workspace Skills
-
-The `gws-gmail` and `gws-gmail-read` skills in `.claude/skills/` are sourced from https://github.com/googleworkspace/cli
-
-For any ambiguity or issues with Google Workspace tasks (Gmail, Calendar, Drive, etc.), check this repo for additional skills or capabilities that can be pulled in.
-
----
-
-## Remote Model Switching
-
-The Ararat remote control session can switch between Claude models via the `send-cmd.sh` script:
-
-```sh
-./send-cmd.sh "/model haiku"
-./send-cmd.sh "/model sonnet"
-./send-cmd.sh "/model opus"
-```
-
-The script sends commands via dtach to the socket at `/tmp/ararat.sock` (the same session that handles Telegram messages). Claude can execute these commands autonomously to switch its own model during a conversation.
 
 ## Session Clearing
 
-When you ask to clear the session (e.g., "clear pls", "clear", or similar), run:
+When the user asks to clear the session (e.g., "clear pls", "clear", or similar), run:
 
 ```sh
 ./send-cmd.sh "/clear"
@@ -115,9 +71,52 @@ systemctl --user restart ararat.service
 
 This restarts the Ararat Telegram bot systemd user service. Note: restarting will terminate the current session, so this should be the last action taken.
 
+## Voice Note Transcription
+
+When a Telegram message has an `attachment_file_id` that is a voice note (or the user sends a voice message):
+
+1. Call `download_attachment` with the `file_id` to get a local file path
+2. Run `./transcribe.sh <path>` — outputs the transcript text to stdout
+3. Treat the transcript as the user's message and respond accordingly
+
+The script loads `OPENAI_API_KEY` from `.env` automatically.
+
+```sh
+./transcribe.sh /path/to/voice.ogg
+```
+
+## Available Capabilities
+
+### MCP Tools
+- **Telegram** — `reply`, `react`, `edit_message`, `download_attachment` (primary user interface)
+- **Google Calendar** — `mcp__claude_ai_Google_Calendar__authenticate` + calendar tools (read/create events)
+- **CardPointers** — `list_my_cards`, `recommend_card`, `search_my_offers`, `list_my_offers` (credit card recommendations and offers)
+
+### Skills
+- **gws-gmail** / **gws-gmail-read** — send and read Gmail
+- Other Google Workspace skills available at https://github.com/googleworkspace/cli
+
+### Local Files
+- `TODO.md` — task tracking (Backlog / In Progress / Done); update when managing tasks
+- `SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
+- `claude-macos.md` — macOS-only instructions (read only on macOS)
+- `server-provisioning.md` — Hetzner server bootstrap pattern
+
+---
+
+## Service Management
+
+```sh
+systemctl --user status ararat.service        # Check if running
+journalctl --user -u ararat.service -f        # Tail logs
+systemctl --user restart ararat.service       # Restart (terminates current session)
+```
+
+---
+
 ## Git Permissions
 
-Claude has write access to the repository via a fine-grained GitHub PAT token with "Contents" write permission scoped to this repo only. I can autonomously commit and push changes.
+You have write access to the repository via a fine-grained GitHub PAT token with "Contents" write permission scoped to this repo only. You can autonomously commit and push changes.
 
 ### Commit Strategy
 

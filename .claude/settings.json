@@ -13,7 +13,20 @@
   },
   "enabledPlugins": {
     "claude-md-management@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true,
-    "telegram@claude-plugins-official": true
+    "skill-creator@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gws gmail:*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(uvx things-cli:*)",
+      "Bash(gh api:*)",
+      "WebSearch"
+    ]
+  },
+  "env": {
+    "ENABLE_EXPERIMENTAL_MCP_CLI": "true"
   }
 }

@@ -1,9 +1,5 @@
 # Project Notes
 
-> **Note for Claude**: macOS-specific instructions (Things 3, etc.) are in `claude-macos.md`. Only read that file if running on macOS.
-
----
-
 ## Primary Role
 
 **Your primary goal in this project is to be a helpful chat assistant**, communicating with the user primarily via Telegram through the Ararat channel.
@@ -120,13 +116,9 @@ This clears the Ararat remote control session's context.
 When asked to restart (e.g., "restart", "restart yourself", "restart ararat"):
 
 1. **Save cron state first** — Call `CronList` and write the results to `cron-state.json` in the repo root. This preserves scheduled jobs across the restart.
-2. Then run:
+2. Then restart the Ararat process (macOS host — use whatever mechanism is appropriate, e.g. launchctl or the process manager in use).
 
-```sh
-systemctl --user restart ararat.service
-```
-
-This restarts the Ararat Telegram bot systemd user service. Note: restarting will terminate the current session, so this should be the last action taken.
+Note: restarting will terminate the current session, so this should be the last action taken.
 
 ### On session start after a restart
 
@@ -165,32 +157,83 @@ The script loads `OPENAI_API_KEY` from `.env` automatically.
 - `TODO.md` — task tracking (Backlog / In Progress / Done); update when managing tasks
 - `SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
 - `caffeine-tracker.md` — caffeine intake log (gitignored); append entries when Noah reports caffeine
-- `claude-macos.md` — macOS-only instructions (read only on macOS)
-- `server-provisioning.md` — Hetzner server bootstrap pattern
 
 ---
 
 ## System Environment
 
-This machine runs **NixOS**. Packages can be brought in temporarily without permanent installation:
-
-**Important:** `/bin/bash` does not exist on NixOS. Always use `#!/usr/bin/env bash` as the shebang line in any shell script — never `#!/bin/bash`.
-
-```sh
-nix shell nixpkgs#pkg          # Single package
-nix shell nixpkgs#pkg1 nixpkgs#pkg2  # Multiple packages
-```
-
-These are ephemeral — use freely for one-off tools without worrying about cleanup.
+This machine runs **macOS**. Standard macOS tooling applies.
 
 ---
 
-## Service Management
+## Things 3
+
+### Reading todos (via `uvx things-cli`)
+```sh
+uvx things-cli today          # today's tasks
+uvx things-cli inbox          # inbox
+uvx things-cli todos          # all todos
+uvx things-cli anytime        # anytime list
+uvx things-cli someday        # someday list
+uvx things-cli projects       # all projects
+uvx things-cli search "query" # search
+
+# Filters
+uvx things-cli -p "Project Name" todos   # filter by project
+uvx things-cli -a "Area Name" todos      # filter by area
+uvx things-cli -t "tag" todos            # filter by tag
+
+# Output formats
+uvx things-cli --json today              # JSON output
+uvx things-cli --csv --recursive all     # CSV with nesting
+uvx things-cli --recursive areas         # nested tree view
+```
+
+### Writing todos (via URL scheme)
+```sh
+# Add to inbox
+open "things:///add?title=My%20Todo"
+
+# Add to today
+open "things:///add?title=My%20Todo&when=today"
+
+# Add with notes, deadline, tags
+open "things:///add?title=My%20Todo&when=today&notes=Some%20notes&deadline=2026-04-01&tags=work"
+
+# Add to a specific list/project
+open "things:///add?title=My%20Todo&list=Project%20Name"
+
+# Add to someday
+open "things:///add?title=My%20Todo&when=someday"
+
+# Create a project
+open "things:///add-project?title=My%20Project&when=today"
+
+# Navigate to a view
+open "things:///show?id=today"
+open "things:///show?id=inbox"
+```
+
+`when` accepts: `today`, `tomorrow`, `someday`, `anytime`, or a date like `2026-04-01`.
+
+For **updating** existing todos, Things 3 requires an auth token (Settings > General > Enable Things URLs).
+
+---
+
+## 1Password CLI
+
+Credentials are stored in 1Password and accessible via `op` CLI (already authenticated in shell).
 
 ```sh
-systemctl --user status ararat.service        # Check if running
-journalctl --user -u ararat.service -f        # Tail logs
-systemctl --user restart ararat.service       # Restart (terminates current session)
+# List items by category
+op item list --categories "SSH Key" --format json
+op item list --categories "API Credential" --format json
+
+# Get an item's fields (use --reveal for hidden values)
+op item get "Item Name" --reveal --format json
+
+# Extract a specific field value
+op item get "Item Name" --reveal --fields label=credential
 ```
 
 ---

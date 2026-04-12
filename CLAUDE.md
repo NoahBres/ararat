@@ -136,7 +136,7 @@ When a Telegram message has an `attachment_file_id` that is a voice note (or the
 2. Run `./transcribe.sh <path>` — outputs the transcript text to stdout
 3. Treat the transcript as the user's message and respond accordingly
 
-The script loads `OPENAI_API_KEY` from `.env` automatically.
+The script uses **mlx-whisper** (offline, Apple Silicon) via `uvx`. No API key needed. Default model: `mlx-community/whisper-large-v3-mlx` (override with `WHISPER_MODEL` env var).
 
 ```sh
 ./transcribe.sh /path/to/voice.ogg
@@ -163,6 +163,8 @@ The script loads `OPENAI_API_KEY` from `.env` automatically.
 ## System Environment
 
 This machine runs **macOS**. Standard macOS tooling applies.
+
+**Python package management:** Always use `uv` (or `uvx` for one-off tools) instead of `pip` or `pip3` directly.
 
 ---
 

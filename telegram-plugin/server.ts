@@ -19,9 +19,9 @@ import { z } from 'zod'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
-import { homedir } from 'os'
-import { join, extname, sep } from 'path'
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { homedir, tmpdir } from 'os'
+import { join, extname, sep, basename } from 'path'
 
 const STATE_DIR = process.env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'telegram')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
@@ -51,6 +51,22 @@ if (!TOKEN) {
   process.exit(1)
 }
 const INBOX_DIR = join(STATE_DIR, 'inbox')
+const PID_FILE = join(STATE_DIR, 'bot.pid')
+
+// Telegram allows exactly one getUpdates consumer per token. If a previous
+// session crashed (SIGKILL, terminal closed) its server.ts grandchild can
+// survive as an orphan and hold the slot forever, so every new session sees
+// 409 Conflict. Kill any stale holder before we start polling.
+mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+try {
+  const stale = parseInt(readFileSync(PID_FILE, 'utf8'), 10)
+  if (stale > 1 && stale !== process.pid) {
+    process.kill(stale, 0)
+    process.stderr.write(`telegram channel: replacing stale poller pid=${stale}\n`)
+    process.kill(stale, 'SIGTERM')
+  }
+} catch {}
+writeFileSync(PID_FILE, String(process.pid))
 
 // Last-resort safety net — without these the process dies silently on any
 // unhandled promise rejection. With them it logs and keeps serving tools.
@@ -566,21 +582,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         return { content: [{ type: 'text', text: 'reacted' }] }
       }
       case 'download_attachment': {
-        const file_id = args.file_id as string
-        const file = await bot.api.getFile(file_id)
-        if (!file.file_path) throw new Error('Telegram returned no file_path — file may have expired')
-        const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
-        const res = await fetch(url)
-        if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-        const buf = Buffer.from(await res.arrayBuffer())
-        // file_path is from Telegram (trusted), but strip to safe chars anyway
-        // so nothing downstream can be tricked by an unexpected extension.
-        const rawExt = file.file_path.includes('.') ? file.file_path.split('.').pop()! : 'bin'
-        const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'bin'
-        const uniqueId = (file.file_unique_id ?? '').replace(/[^a-zA-Z0-9_-]/g, '') || 'dl'
-        const path = join(INBOX_DIR, `${Date.now()}-${uniqueId}.${ext}`)
-        mkdirSync(INBOX_DIR, { recursive: true })
-        writeFileSync(path, buf)
+        const path = await downloadToInbox(args.file_id as string)
         return { content: [{ type: 'text', text: path }] }
       }
       case 'edit_message': {
@@ -621,6 +623,9 @@ function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
   process.stderr.write('telegram channel: shutting down\n')
+  try {
+    if (parseInt(readFileSync(PID_FILE, 'utf8'), 10) === process.pid) rmSync(PID_FILE)
+  } catch {}
   // bot.stop() signals the poll loop to end; the current getUpdates request
   // may take up to its long-poll timeout to return. Force-exit after 2s.
   setTimeout(() => process.exit(0), 2000)
@@ -630,6 +635,19 @@ process.stdin.on('end', shutdown)
 process.stdin.on('close', shutdown)
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
+process.on('SIGHUP', shutdown)
+
+// Orphan watchdog: stdin events above don't reliably fire when the parent
+// chain (`bun run` wrapper → shell → us) is severed by a crash. Poll for
+// reparenting (POSIX) or a dead stdin pipe and self-terminate.
+const bootPpid = process.ppid
+setInterval(() => {
+  const orphaned =
+    (process.platform !== 'win32' && process.ppid !== bootPpid) ||
+    process.stdin.destroyed ||
+    process.stdin.readableEnded
+  if (orphaned) shutdown()
+}, 5000).unref()
 
 // Commands are DM-only. Responding in groups would: (1) leak pairing codes via
 // /status to other group members, (2) confirm bot presence in non-allowlisted
@@ -791,13 +809,20 @@ bot.on('message:document', async ctx => {
 
 bot.on('message:voice', async ctx => {
   const voice = ctx.message.voice
-  const text = ctx.message.caption ?? '(voice message)'
-  await handleInbound(ctx, text, undefined, {
-    kind: 'voice',
-    file_id: voice.file_id,
-    size: voice.file_size,
-    mime: voice.mime_type,
-  })
+  let text: string | undefined
+  let attachment: AttachmentMeta | undefined
+  try {
+    const localPath = await downloadToInbox(voice.file_id, 'ogg')
+    text = await transcribeAudio(localPath)
+  } catch (err) {
+    process.stderr.write(`telegram channel: voice download/transcribe failed: ${err}\n`)
+  }
+  if (!text) {
+    // Transcription unavailable — fall back to old behavior so Claude Code can handle it
+    text = ctx.message.caption ?? '(voice message)'
+    attachment = { kind: 'voice', file_id: voice.file_id, size: voice.file_size, mime: voice.mime_type }
+  }
+  await handleInbound(ctx, text, undefined, attachment)
 })
 
 bot.on('message:audio', async ctx => {
@@ -857,6 +882,47 @@ type AttachmentMeta = {
 // or forge a second meta entry.
 function safeName(s: string | undefined): string | undefined {
   return s?.replace(/[<>\[\]\r\n;]/g, '_')
+}
+
+// file_path is from Telegram (trusted), but strip to safe chars anyway
+// so nothing downstream can be tricked by an unexpected extension.
+async function downloadToInbox(fileId: string, defaultExt = 'bin'): Promise<string> {
+  const file = await bot.api.getFile(fileId)
+  if (!file.file_path) throw new Error('Telegram returned no file_path — file may have expired')
+  const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
+  const buf = Buffer.from(await res.arrayBuffer())
+  const rawExt = file.file_path.includes('.') ? file.file_path.split('.').pop()! : defaultExt
+  const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '') || defaultExt
+  const uniqueId = (file.file_unique_id ?? '').replace(/[^a-zA-Z0-9_-]/g, '') || 'dl'
+  const localPath = join(INBOX_DIR, `${Date.now()}-${uniqueId}.${ext}`)
+  mkdirSync(INBOX_DIR, { recursive: true })
+  writeFileSync(localPath, buf)
+  return localPath
+}
+
+async function transcribeAudio(localPath: string): Promise<string | undefined> {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'whisper-'))
+  try {
+    const model = process.env.WHISPER_MODEL ?? 'mlx-community/whisper-large-v3-mlx'
+    const proc = Bun.spawn(
+      ['uvx', 'mlx_whisper', '--model', model, '--output-dir', tmpDir, '--output-format', 'txt', '--verbose', 'False', localPath],
+      { stderr: 'inherit' },
+    )
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      process.stderr.write(`telegram channel: mlx_whisper exited with code ${exitCode}\n`)
+      return undefined
+    }
+    const name = basename(localPath).replace(/\.[^.]+$/, '')
+    return readFileSync(join(tmpDir, `${name}.txt`), 'utf8').trim()
+  } catch (err) {
+    process.stderr.write(`telegram channel: transcription error: ${err}\n`)
+    return undefined
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true })
+  }
 }
 
 async function handleInbound(
@@ -980,6 +1046,13 @@ void (async () => {
       return // bot.stop() was called — clean exit from the loop
     } catch (err) {
       if (err instanceof GrammyError && err.error_code === 409) {
+        if (attempt >= 8) {
+          process.stderr.write(
+            `telegram channel: 409 Conflict persists after ${attempt} attempts — ` +
+            `another poller is holding the bot token (stray 'bun server.ts' process or a second session). Exiting.\n`,
+          )
+          return
+        }
         const delay = Math.min(1000 * attempt, 15000)
         const detail = attempt === 1
           ? ' — another instance is polling (zombie session, or a second Claude Code running?)'

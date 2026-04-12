@@ -138,7 +138,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - Other Google Workspace skills available at https://github.com/googleworkspace/cli
 
 ### Local Files
-- `SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
+- `notes/SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
 - `private-data/caffeine-tracker.md` — caffeine intake log (gitignored); append entries when Noah reports caffeine
 - `private-data/sleep-tracker.md` — sleep log (gitignored)
 

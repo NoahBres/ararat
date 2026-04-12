@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: ./transcribe.sh <audio-file-path>
-# Transcribes audio using OpenAI Whisper API.
-# Requires OPENAI_API_KEY in .env or environment.
+# Transcribes audio offline using mlx-whisper (Apple Silicon).
+# Runs via uvx — no manual install required.
 
 set -euo pipefail
 
@@ -17,20 +17,19 @@ if [[ ! -f "$AUDIO_FILE" ]]; then
   exit 1
 fi
 
-# Load .env if present
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  # shellcheck disable=SC1091
-  set -a; source "$SCRIPT_DIR/.env"; set +a
-fi
+MODEL="${WHISPER_MODEL:-mlx-community/whisper-large-v3-mlx}"
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
 
-if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-  echo "OPENAI_API_KEY is not set" >&2
-  exit 1
-fi
+# mlx_whisper writes <basename>.txt to the output dir
+BASENAME="$(basename "$AUDIO_FILE")"
+NAME="${BASENAME%.*}"
 
-curl -s https://api.openai.com/v1/audio/transcriptions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -F "file=@$AUDIO_FILE" \
-  -F "model=whisper-1" \
-  -F "response_format=text"
+uvx mlx_whisper \
+  --model "$MODEL" \
+  --output-dir "$TMPDIR" \
+  --output-format txt \
+  --verbose False \
+  "$AUDIO_FILE" >&2
+
+cat "$TMPDIR/${NAME}.txt"

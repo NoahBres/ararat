@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Outputs cron restore instructions if cron-state.json exists.
 # Runs as a SessionStart hook — output is injected into Claude's context.
-CRON_STATE="/home/noah/Developer/ararat/cron-state.json"
+CRON_STATE="/Users/noah/Developer/ararat/cron-state.json"
 
 if [ -f "$CRON_STATE" ]; then
   echo "ARARAT STARTUP RESTORE: cron-state.json was found, indicating the service was restarted."

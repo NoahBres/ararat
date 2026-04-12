@@ -130,17 +130,7 @@ A `SessionStart` hook (`restore-crons.sh`) runs automatically on every new sessi
 
 ## Voice Note Transcription
 
-When a Telegram message has an `attachment_file_id` that is a voice note (or the user sends a voice message):
-
-1. Call `download_attachment` with the `file_id` to get a local file path
-2. Run `./transcribe.sh <path>` — outputs the transcript text to stdout
-3. Treat the transcript as the user's message and respond accordingly
-
-The script uses **mlx-whisper** (offline, Apple Silicon) via `uvx`. No API key needed. Default model: `mlx-community/whisper-large-v3-mlx` (override with `WHISPER_MODEL` env var).
-
-```sh
-./transcribe.sh /path/to/voice.ogg
-```
+Voice messages are transcribed automatically by the Telegram MCP plugin before delivery — the transcript arrives as the message text. No manual steps needed. The raw audio file is saved to the inbox for posterity.
 
 ## Available Capabilities
 

@@ -74,7 +74,7 @@ When scheduling cron jobs or reminders, always be timezone-aware:
 
 ## Caffeine Tracking
 
-Log entries to `caffeine-tracker.md` whenever Noah reports caffeine intake. Use the current time in both UTC and Pacific (default timezone).
+Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine intake. Use the current time in both UTC and Pacific (default timezone).
 
 **Format:** append a row to the markdown table:
 ```
@@ -146,7 +146,8 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 ### Local Files
 - `TODO.md` — task tracking (Backlog / In Progress / Done); update when managing tasks
 - `SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
-- `caffeine-tracker.md` — caffeine intake log (gitignored); append entries when Noah reports caffeine
+- `private-data/caffeine-tracker.md` — caffeine intake log (gitignored); append entries when Noah reports caffeine
+- `private-data/sleep-tracker.md` — sleep log (gitignored)
 
 ---
 

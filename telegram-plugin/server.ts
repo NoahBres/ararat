@@ -932,6 +932,10 @@ async function handleInbound(
         user: from.username ?? String(from.id),
         user_id: String(from.id),
         ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
+        ...(ctx.message?.reply_to_message != null ? {
+          reply_to_message_id: String(ctx.message.reply_to_message.message_id),
+          ...(ctx.message.reply_to_message.text ? { reply_to_text: ctx.message.reply_to_message.text } : {}),
+        } : {}),
         ...(imagePath ? { image_path: imagePath } : {}),
         ...(attachment ? {
           attachment_kind: attachment.kind,

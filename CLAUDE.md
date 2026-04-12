@@ -87,12 +87,6 @@ Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine
 
 ---
 
-## Local TODO
-
-There's a local `TODO.md` file in the repo for quick task tracking with Backlog, In Progress, and Done sections.
-
----
-
 ## Google Workspace
 
 - **Gmail**: Use `gws-gmail` / `gws-gmail-read` skills
@@ -144,7 +138,6 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - Other Google Workspace skills available at https://github.com/googleworkspace/cli
 
 ### Local Files
-- `TODO.md` — task tracking (Backlog / In Progress / Done); update when managing tasks
 - `SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
 - `private-data/caffeine-tracker.md` — caffeine intake log (gitignored); append entries when Noah reports caffeine
 - `private-data/sleep-tracker.md` — sleep log (gitignored)

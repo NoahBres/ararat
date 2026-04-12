@@ -26,9 +26,9 @@ The subagent receives a focused prompt, does the heavy reasoning, and returns it
 Noah can request a full session model switch. Only do this when explicitly asked (e.g., "switch to opus", "use sonnet").
 
 ```sh
-./send-cmd.sh "/model haiku"    # Default
-./send-cmd.sh "/model sonnet"   # Medium complexity
-./send-cmd.sh "/model opus"     # Complex planning
+./tools/send-cmd.sh "/model haiku"    # Default
+./tools/send-cmd.sh "/model sonnet"   # Medium complexity
+./tools/send-cmd.sh "/model opus"     # Complex planning
 ```
 
 ---
@@ -100,7 +100,7 @@ Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine
 When the user asks to clear the session (e.g., "clear pls", "clear", or similar), run:
 
 ```sh
-./send-cmd.sh "/clear"
+./tools/send-cmd.sh "/clear"
 ```
 
 This clears the Ararat remote control session's context.

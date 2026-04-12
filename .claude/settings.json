@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/Developer/ararat/restore-crons.sh"
+            "command": "$HOME/Developer/ararat/tools/restore-crons.sh"
           }
         ]
       }

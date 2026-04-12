@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
-# Send command to dtach session
+# Send command to tmux ararat session
 # Usage: ./send-cmd.sh "command"
 
-SOCKET="/tmp/ararat.sock"
+SESSION="ararat"
 CMD="${1:-/model haiku}"
 
-if [ ! -S "$SOCKET" ]; then
-  echo "Socket not found: $SOCKET"
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "tmux session not found: $SESSION"
   exit 1
 fi
 
-printf "%s\r" "$CMD" | dtach -p "$SOCKET"
+tmux send-keys -t "$SESSION" "$CMD" Enter

@@ -116,7 +116,7 @@ This clears the Ararat remote control session's context.
 When asked to restart (e.g., "restart", "restart yourself", "restart ararat"):
 
 1. **Save cron state first** — Call `CronList` and write the results to `cron-state.json` in the repo root. This preserves scheduled jobs across the restart.
-2. Then restart the Ararat process (macOS host — use whatever mechanism is appropriate, e.g. launchctl or the process manager in use).
+2. Then restart using the `restart-ararat` shell alias. Do NOT use launchctl or other custom commands.
 
 Note: restarting will terminate the current session, so this should be the last action taken.
 

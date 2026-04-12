@@ -1,6 +1,7 @@
 # TODO
 
 ## Backlog
+- Craft MCP
 
 ## In Progress
 - 

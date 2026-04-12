@@ -1,6 +1,19 @@
 {
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/Developer/ararat/restore-crons.sh"
+          }
+        ]
+      }
+    ]
+  },
   "enabledPlugins": {
     "claude-md-management@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true
+    "skill-creator@claude-plugins-official": true,
+    "telegram@claude-plugins-official": true
   }
 }

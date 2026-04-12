@@ -129,7 +129,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 ## Available Capabilities
 
 ### MCP Tools
-- **Telegram** — `reply`, `react`, `edit_message`, `download_attachment` (primary user interface)
+- **Telegram** — `reply`, `react`, `edit_message`, `download_attachment` (primary user interface); plugin is based on https://github.com/anthropics/claude-plugins-official/blob/main/external_plugins/telegram/README.md
 - **Google Calendar** — `mcp__claude_ai_Google_Calendar__authenticate` + calendar tools (read/create events)
 - **CardPointers** — `list_my_cards`, `recommend_card`, `search_my_offers`, `list_my_offers` (credit card recommendations and offers)
 

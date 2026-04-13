@@ -280,3 +280,7 @@ You have write access to the repository via a fine-grained GitHub PAT token with
 When asked to commit and push, split unstaged changes into **atomic commits by subject/change**. Each commit should represent a single logical unit of work. Then push all commits together.
 
 Example: If changes span 3 different features/fixes, create 3 separate commits with clear, focused messages — then push all of them.
+
+### Secrets Sweep
+
+Before committing anything, scan all staged files for secrets — API keys, tokens, passwords, and credentials. Look for patterns like hardcoded tokens in example commands, `.env`-style values embedded in docs, etc. If found, redact or replace with a placeholder (e.g. `$VAR_NAME`) and flag it to Noah before proceeding.

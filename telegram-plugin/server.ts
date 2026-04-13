@@ -1023,9 +1023,39 @@ bot.catch(err => {
   process.stderr.write(`telegram channel: handler error (polling continues): ${err.error}\n`)
 })
 
+// If Claude Code closes the MCP stdio pipe (restart, crash, /clear-session),
+// the bun process would otherwise keep running as an orphan receiving Telegram
+// messages but unable to deliver them. Exit so Claude respawns a fresh server.
+process.stdin.resume()
+process.stdin.on('end', () => {
+  process.stderr.write('telegram channel: stdin closed (Claude disconnected), exiting\n')
+  process.exit(1)
+})
+
+// Periodic keepalive: verify Telegram connectivity every 60s. Three consecutive
+// failures indicate the bot is zombied (polling loop alive but API unreachable)
+// — exit so the MCP server gets respawned with a fresh polling connection.
+let keepaliveFailures = 0
+const keepaliveInterval = setInterval(async () => {
+  try {
+    await bot.api.getMe()
+    keepaliveFailures = 0
+  } catch (err) {
+    keepaliveFailures++
+    process.stderr.write(`telegram channel: keepalive failed (${keepaliveFailures}/3): ${err}\n`)
+    if (keepaliveFailures >= 3) {
+      process.stderr.write('telegram channel: keepalive failed 3 times, exiting for respawn\n')
+      clearInterval(keepaliveInterval)
+      process.exit(1)
+    }
+  }
+}, 60_000)
+keepaliveInterval.unref() // don't prevent clean exit
+
 // 409 Conflict = another getUpdates consumer is still active (zombie from a
 // previous session, or a second Claude Code instance). Retry with backoff
-// until the slot frees up instead of crashing on the first rejection.
+// until the slot frees up. Any other polling error also retries with backoff —
+// a transient network blip should not silence the bot permanently.
 void (async () => {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -1045,13 +1075,16 @@ void (async () => {
       })
       return // bot.stop() was called — clean exit from the loop
     } catch (err) {
+      // bot.stop() mid-setup rejects with grammy's "Aborted delay" — expected, not an error.
+      if (err instanceof Error && err.message === 'Aborted delay') return
+
       if (err instanceof GrammyError && err.error_code === 409) {
         if (attempt >= 8) {
           process.stderr.write(
             `telegram channel: 409 Conflict persists after ${attempt} attempts — ` +
             `another poller is holding the bot token (stray 'bun server.ts' process or a second session). Exiting.\n`,
           )
-          return
+          process.exit(1)
         }
         const delay = Math.min(1000 * attempt, 15000)
         const detail = attempt === 1
@@ -1063,10 +1096,11 @@ void (async () => {
         await new Promise(r => setTimeout(r, delay))
         continue
       }
-      // bot.stop() mid-setup rejects with grammy's "Aborted delay" — expected, not an error.
-      if (err instanceof Error && err.message === 'Aborted delay') return
-      process.stderr.write(`telegram channel: polling failed: ${err}\n`)
-      return
+
+      // Any other error: retry with exponential backoff up to 30s.
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 30_000)
+      process.stderr.write(`telegram channel: polling failed (attempt ${attempt}), retrying in ${delay / 1000}s: ${err}\n`)
+      await new Promise(r => setTimeout(r, delay))
     }
   }
 })()

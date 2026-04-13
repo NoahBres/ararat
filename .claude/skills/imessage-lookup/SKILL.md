@@ -26,7 +26,7 @@ for db_path in dbs:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         rows = conn.execute("""
             SELECT
-                r.ZFIRSTNAME, r.ZLASTNAME, r.ZORGANIZATIONNAME,
+                r.ZFIRSTNAME, r.ZLASTNAME, r.ZORGANIZATION,
                 p.ZFULLNUMBER,
                 e.ZADDRESS
             FROM ZABCDRECORD r
@@ -35,7 +35,7 @@ for db_path in dbs:
             WHERE
                 r.ZFIRSTNAME LIKE :q
                 OR r.ZLASTNAME LIKE :q
-                OR r.ZORGANIZATIONNAME LIKE :q
+                OR r.ZORGANIZATION LIKE :q
                 OR (r.ZFIRSTNAME || ' ' || r.ZLASTNAME) LIKE :q
         """, {"q": f"%{name}%"}).fetchall()
         conn.close()
@@ -63,7 +63,16 @@ Run this with the Bash tool (via `python3 -c "..."` or a temp file).
 
 ## Step 2: Handle the results
 
-**No matches:** Tell the user no contact was found and ask them to try a phone number or email directly.
+**No matches:** `imessage-query.py` has built-in fallbacks — proceed directly to Step 3 using the raw name as the identifier. The script will automatically:
+1. Re-query the local AddressBook SQLite
+2. Fall back to Contacts.app via osascript (reads iCloud contacts not in local SQLite)
+3. Fall back to group chat display names in chat.db
+
+```bash
+python3 ~/Developer/ararat/tools/imessage-query.py "CONTACT_NAME" ["KEYWORD"] --days 90
+```
+
+If this also returns nothing, the contact simply isn't resolvable by name on this machine — ask the user for the phone number or email directly.
 
 **One contact, one identifier:** Proceed directly to Step 3.
 

@@ -114,6 +114,127 @@ def apple_ts_to_dt(ns: int) -> datetime:
     return datetime.fromtimestamp(ns / 1e9 + APPLE_EPOCH_OFFSET, tz=timezone.utc).astimezone()
 
 
+AB_GLOB = str(Path.home() / "Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb")
+AB_MAIN = str(Path.home() / "Library/Application Support/AddressBook/AddressBook-v22.abcddb")
+
+
+def resolve_name_to_identifiers(name: str) -> list[str]:
+    """Look up phone numbers / emails for a contact name.
+
+    Tries in order:
+    1. Local AddressBook SQLite databases
+    2. Contacts.app via osascript (reads iCloud contacts directly)
+    3. chat.db group chat display names (last resort)
+    """
+    import glob as _glob
+    import subprocess
+    identifiers = set()
+
+    # 1. Local AddressBook SQLite
+    dbs = _glob.glob(AB_GLOB) + [AB_MAIN]
+    for db_path in dbs:
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            rows = conn.execute("""
+                SELECT p.ZFULLNUMBER, e.ZADDRESS
+                FROM ZABCDRECORD r
+                LEFT JOIN ZABCDPHONENUMBER p ON p.ZOWNER = r.Z_PK
+                LEFT JOIN ZABCDEMAILADDRESS e ON e.ZOWNER = r.Z_PK
+                WHERE
+                    r.ZFIRSTNAME LIKE :q OR r.ZLASTNAME LIKE :q
+                    OR r.ZORGANIZATION LIKE :q
+                    OR (r.ZFIRSTNAME || ' ' || r.ZLASTNAME) LIKE :q
+            """, {"q": f"%{name}%"}).fetchall()
+            conn.close()
+            for phone, email in rows:
+                if phone:
+                    normalized = re.sub(r"[^\d+]", "", phone)
+                    if normalized:
+                        identifiers.add(normalized)
+                if email:
+                    identifiers.add(email.lower())
+        except Exception:
+            pass
+
+    if identifiers:
+        return list(identifiers)
+
+    # 2. Contacts.app via osascript (iCloud-synced contacts not in local SQLite)
+    try:
+        script = f'''
+tell application "Contacts"
+    set matches to every person whose (first name contains "{name}" or last name contains "{name}")
+    set out to ""
+    repeat with p in matches
+        repeat with ph in phones of p
+            set out to out & value of ph & "\\n"
+        end repeat
+        repeat with em in emails of p
+            set out to out & value of em & "\\n"
+        end repeat
+    end repeat
+    return out
+end tell'''
+        result = subprocess.run(["osascript", "-e", script],
+                                capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if "@" in line:
+                identifiers.add(line.lower())
+            else:
+                normalized = re.sub(r"[^\d+]", "", line)
+                if normalized:
+                    identifiers.add(normalized)
+    except Exception:
+        pass
+
+    if identifiers:
+        return list(identifiers)
+
+    # 3. chat.db group chat display names
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        rows = conn.execute("""
+            SELECT DISTINCT h.id
+            FROM chat c
+            JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+            JOIN handle h ON h.ROWID = chj.handle_id
+            WHERE c.display_name LIKE :q
+        """, {"q": f"%{name}%"}).fetchall()
+        conn.close()
+        for (handle_id,) in rows:
+            identifiers.add(handle_id)
+    except Exception:
+        pass
+
+    if identifiers:
+        return list(identifiers)
+
+    # 4. Search message text — find handles whose messages mention the name
+    #    (catches introductions like "hey it's Kirill" or shared contact cards)
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        rows = conn.execute("""
+            SELECT h.id, COUNT(*) as cnt
+            FROM message m
+            JOIN handle h ON h.ROWID = m.handle_id
+            WHERE m.text LIKE :q
+              AND m.is_from_me = 0
+            GROUP BY h.id
+            ORDER BY cnt DESC
+            LIMIT 5
+        """, {"q": f"%{name}%"}).fetchall()
+        conn.close()
+        for handle_id, _ in rows:
+            identifiers.add(handle_id)
+    except Exception:
+        pass
+
+    return list(identifiers)
+
+
 def query(contact: str, keyword, days: int, limit: int):
     if not DB_PATH.exists():
         sys.exit(f"chat.db not found — grant Terminal Full Disk Access in System Settings.")
@@ -121,7 +242,24 @@ def query(contact: str, keyword, days: int, limit: int):
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
-    rows = conn.execute("""
+    # Try to resolve a name to phone/email identifiers via AddressBook
+    resolved = resolve_name_to_identifiers(contact)
+
+    if resolved:
+        # Build OR clauses for each resolved identifier
+        placeholders = " OR ".join(
+            f"h.id LIKE :id{i} OR c.chat_identifier LIKE :id{i}"
+            for i in range(len(resolved))
+        )
+        params = {"cutoff": days * 86400, "limit": limit * 3}
+        params.update({f"id{i}": f"%{v}%" for i, v in enumerate(resolved)})
+        where_clause = f"({placeholders})"
+    else:
+        # Fall back to plain name match against handle/chat fields
+        params = {"cutoff": days * 86400, "contact": f"%{contact}%", "limit": limit * 3}
+        where_clause = "(h.id LIKE :contact OR c.display_name LIKE :contact OR c.chat_identifier LIKE :contact)"
+
+    rows = conn.execute(f"""
         SELECT m.date, m.text, m.attributedBody, m.is_from_me, h.id AS handle_id
         FROM message m
         JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
@@ -129,14 +267,10 @@ def query(contact: str, keyword, days: int, limit: int):
         LEFT JOIN handle h ON h.ROWID = m.handle_id
         WHERE
             m.date > (strftime('%s','now') - strftime('%s','2001-01-01') - :cutoff) * 1000000000
-            AND (h.id LIKE :contact OR c.display_name LIKE :contact OR c.chat_identifier LIKE :contact)
+            AND {where_clause}
         ORDER BY m.date DESC
         LIMIT :limit
-    """, {
-        "cutoff": days * 86400,
-        "contact": f"%{contact}%",
-        "limit": limit * 3,
-    }).fetchall()
+    """, params).fetchall()
     conn.close()
 
     results = []

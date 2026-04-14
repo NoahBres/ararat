@@ -19,7 +19,7 @@ import { z } from 'zod'
 import { Bot, GrammyError, InlineKeyboard, InputFile, type Context } from 'grammy'
 import type { ReactionTypeEmoji } from 'grammy/types'
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync, appendFileSync, existsSync } from 'fs'
 import { homedir, tmpdir } from 'os'
 import { join, extname, sep, basename } from 'path'
 
@@ -27,6 +27,33 @@ const STATE_DIR = process.env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', '
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
+
+// --- Logging setup ---
+// Logs go to STATE_DIR/server.log (survives restarts). On startup, rotate old
+// logs: server.log → server.log.1 → ... up to LOG_KEEP rotations, then delete.
+const LOG_FILE = join(STATE_DIR, 'server.log')
+const LOG_KEEP = 5
+
+function rotateLogs() {
+  // Rotate from highest to lowest to avoid clobbering
+  for (let i = LOG_KEEP - 1; i >= 1; i--) {
+    const older = `${LOG_FILE}.${i}`
+    const newer = i === 1 ? LOG_FILE : `${LOG_FILE}.${i - 1}`
+    if (existsSync(newer)) renameSync(newer, older)
+  }
+}
+
+function log(msg: string) {
+  const ts = new Date().toISOString()
+  const line = `[${ts}] ${msg}\n`
+  process.stderr.write(line)
+  try { appendFileSync(LOG_FILE, line) } catch {}
+}
+
+// Rotate before writing anything so the previous session's log is preserved
+mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+rotateLogs()
+log('telegram channel: starting up')
 
 // Load ~/.claude/channels/telegram/.env into process.env. Real env wins.
 // Plugin-spawned servers don't get an env block — this is where the token lives.
@@ -43,11 +70,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const STATIC = process.env.TELEGRAM_ACCESS_MODE === 'static'
 
 if (!TOKEN) {
-  process.stderr.write(
-    `telegram channel: TELEGRAM_BOT_TOKEN required\n` +
-    `  set in ${ENV_FILE}\n` +
-    `  format: TELEGRAM_BOT_TOKEN=123456789:AAH...\n`,
-  )
+  log(`telegram channel: TELEGRAM_BOT_TOKEN required — set in ${ENV_FILE} (format: TELEGRAM_BOT_TOKEN=123456789:AAH...)`)
   process.exit(1)
 }
 const INBOX_DIR = join(STATE_DIR, 'inbox')
@@ -57,12 +80,11 @@ const PID_FILE = join(STATE_DIR, 'bot.pid')
 // session crashed (SIGKILL, terminal closed) its server.ts grandchild can
 // survive as an orphan and hold the slot forever, so every new session sees
 // 409 Conflict. Kill any stale holder before we start polling.
-mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
 try {
   const stale = parseInt(readFileSync(PID_FILE, 'utf8'), 10)
   if (stale > 1 && stale !== process.pid) {
     process.kill(stale, 0)
-    process.stderr.write(`telegram channel: replacing stale poller pid=${stale}\n`)
+    log(`telegram channel: replacing stale poller pid=${stale}`)
     process.kill(stale, 'SIGTERM')
   }
 } catch {}
@@ -71,10 +93,10 @@ writeFileSync(PID_FILE, String(process.pid))
 // Last-resort safety net — without these the process dies silently on any
 // unhandled promise rejection. With them it logs and keeps serving tools.
 process.on('unhandledRejection', err => {
-  process.stderr.write(`telegram channel: unhandled rejection: ${err}\n`)
+  log(`telegram channel: unhandled rejection: ${err}`)
 })
 process.on('uncaughtException', err => {
-  process.stderr.write(`telegram channel: uncaught exception: ${err}\n`)
+  log(`telegram channel: uncaught exception: ${err}`)
 })
 
 // Permission-reply spec from anthropics/claude-cli-internal
@@ -164,7 +186,7 @@ function readAccessFile(): Access {
     try {
       renameSync(ACCESS_FILE, `${ACCESS_FILE}.corrupt-${Date.now()}`)
     } catch {}
-    process.stderr.write(`telegram channel: access.json is corrupt, moved aside. Starting fresh.\n`)
+    log(`telegram channel: access.json is corrupt, moved aside. Starting fresh.`)
     return defaultAccess()
   }
 }
@@ -176,9 +198,7 @@ const BOOT_ACCESS: Access | null = STATIC
   ? (() => {
       const a = readAccessFile()
       if (a.dmPolicy === 'pairing') {
-        process.stderr.write(
-          'telegram channel: static mode — dmPolicy "pairing" downgraded to "allowlist"\n',
-        )
+        log('telegram channel: static mode — dmPolicy "pairing" downgraded to "allowlist"')
         a.dmPolicy = 'allowlist'
       }
       a.pending = {}
@@ -328,7 +348,7 @@ function checkApprovals(): void {
     void bot.api.sendMessage(senderId, "Paired! Say hi to Claude.").then(
       () => rmSync(file, { force: true }),
       err => {
-        process.stderr.write(`telegram channel: failed to send approval confirm: ${err}\n`)
+        log(`telegram channel: failed to send approval confirm: ${err}`)
         // Remove anyway — don't loop on a broken send.
         rmSync(file, { force: true })
       },
@@ -423,7 +443,7 @@ mcp.setNotificationHandler(
       .text('❌ Deny', `perm:deny:${request_id}`)
     for (const chat_id of access.allowFrom) {
       void bot.api.sendMessage(chat_id, text, { reply_markup: keyboard }).catch(e => {
-        process.stderr.write(`permission_request send to ${chat_id} failed: ${e}\n`)
+        log(`telegram channel: permission_request send to ${chat_id} failed: ${e}`)
       })
     }
   },
@@ -622,7 +642,7 @@ let shuttingDown = false
 function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
-  process.stderr.write('telegram channel: shutting down\n')
+  log('telegram channel: shutting down')
   try {
     if (parseInt(readFileSync(PID_FILE, 'utf8'), 10) === process.pid) rmSync(PID_FILE)
   } catch {}
@@ -788,7 +808,7 @@ bot.on('message:photo', async ctx => {
       writeFileSync(path, buf)
       return path
     } catch (err) {
-      process.stderr.write(`telegram channel: photo download failed: ${err}\n`)
+      log(`telegram channel: photo download failed: ${err}`)
       return undefined
     }
   })
@@ -815,7 +835,7 @@ bot.on('message:voice', async ctx => {
     const localPath = await downloadToInbox(voice.file_id, 'ogg')
     text = await transcribeAudio(localPath)
   } catch (err) {
-    process.stderr.write(`telegram channel: voice download/transcribe failed: ${err}\n`)
+    log(`telegram channel: voice download/transcribe failed: ${err}`)
   }
   if (!text) {
     // Transcription unavailable — fall back to old behavior so Claude Code can handle it
@@ -912,13 +932,13 @@ async function transcribeAudio(localPath: string): Promise<string | undefined> {
     )
     const exitCode = await proc.exited
     if (exitCode !== 0) {
-      process.stderr.write(`telegram channel: mlx_whisper exited with code ${exitCode}\n`)
+      log(`telegram channel: mlx_whisper exited with code ${exitCode}`)
       return undefined
     }
     const name = basename(localPath).replace(/\.[^.]+$/, '')
     return readFileSync(join(tmpDir, `${name}.txt`), 'utf8').trim()
   } catch (err) {
-    process.stderr.write(`telegram channel: transcription error: ${err}\n`)
+    log(`telegram channel: transcription error: ${err}`)
     return undefined
   } finally {
     rmSync(tmpDir, { recursive: true, force: true })
@@ -952,6 +972,8 @@ async function handleInbound(
   const from = ctx.from!
   const chat_id = String(ctx.chat!.id)
   const msgId = ctx.message?.message_id
+
+  log(`telegram channel: inbound from ${from.username ?? from.id} (chat=${chat_id} msg=${msgId}) — ${text.length} chars`)
 
   // Permission-reply intercept: if this looks like "yes xxxxx" for a
   // pending permission request, emit the structured event instead of
@@ -1025,13 +1047,12 @@ async function handleInbound(
     ),
   ]).then(() => {
     consecutiveDeliveryFailures = 0
+    log(`telegram channel: delivered inbound to Claude (chat=${chat_id} msg=${msgId})`)
   }).catch(err => {
     consecutiveDeliveryFailures++
-    process.stderr.write(
-      `telegram channel: failed to deliver inbound to Claude (${consecutiveDeliveryFailures}/3): ${err}\n`,
-    )
+    log(`telegram channel: failed to deliver inbound to Claude (${consecutiveDeliveryFailures}/3): ${err}`)
     if (consecutiveDeliveryFailures >= 3) {
-      process.stderr.write('telegram channel: 3 consecutive delivery failures — exiting for respawn\n')
+      log('telegram channel: 3 consecutive delivery failures — exiting for respawn')
       process.exit(1)
     }
   })
@@ -1040,7 +1061,7 @@ async function handleInbound(
 // Without this, any throw in a message handler stops polling permanently
 // (grammy's default error handler calls bot.stop() and rethrows).
 bot.catch(err => {
-  process.stderr.write(`telegram channel: handler error (polling continues): ${err.error}\n`)
+  log(`telegram channel: handler error (polling continues): ${err.error}`)
 })
 
 // If Claude Code closes the MCP stdio pipe (restart, crash, /clear-session),
@@ -1048,7 +1069,7 @@ bot.catch(err => {
 // messages but unable to deliver them. Exit so Claude respawns a fresh server.
 process.stdin.resume()
 process.stdin.on('end', () => {
-  process.stderr.write('telegram channel: stdin closed (Claude disconnected), exiting\n')
+  log('telegram channel: stdin closed (Claude disconnected), exiting')
   process.exit(1)
 })
 
@@ -1062,9 +1083,9 @@ const keepaliveInterval = setInterval(async () => {
     keepaliveFailures = 0
   } catch (err) {
     keepaliveFailures++
-    process.stderr.write(`telegram channel: keepalive failed (${keepaliveFailures}/3): ${err}\n`)
+    log(`telegram channel: keepalive failed (${keepaliveFailures}/3): ${err}`)
     if (keepaliveFailures >= 3) {
-      process.stderr.write('telegram channel: keepalive failed 3 times, exiting for respawn\n')
+      log('telegram channel: keepalive failed 3 times, exiting for respawn')
       clearInterval(keepaliveInterval)
       process.exit(1)
     }
@@ -1082,7 +1103,7 @@ void (async () => {
       await bot.start({
         onStart: info => {
           botUsername = info.username
-          process.stderr.write(`telegram channel: polling as @${info.username}\n`)
+          log(`telegram channel: polling as @${info.username}`)
           void bot.api.setMyCommands(
             [
               { command: 'start', description: 'Welcome and setup guide' },
@@ -1100,9 +1121,9 @@ void (async () => {
 
       if (err instanceof GrammyError && err.error_code === 409) {
         if (attempt >= 8) {
-          process.stderr.write(
+          log(
             `telegram channel: 409 Conflict persists after ${attempt} attempts — ` +
-            `another poller is holding the bot token (stray 'bun server.ts' process or a second session). Exiting.\n`,
+            `another poller is holding the bot token (stray 'bun server.ts' process or a second session). Exiting.`,
           )
           process.exit(1)
         }
@@ -1110,16 +1131,14 @@ void (async () => {
         const detail = attempt === 1
           ? ' — another instance is polling (zombie session, or a second Claude Code running?)'
           : ''
-        process.stderr.write(
-          `telegram channel: 409 Conflict${detail}, retrying in ${delay / 1000}s\n`,
-        )
+        log(`telegram channel: 409 Conflict${detail}, retrying in ${delay / 1000}s`)
         await new Promise(r => setTimeout(r, delay))
         continue
       }
 
       // Any other error: retry with exponential backoff up to 30s.
       const delay = Math.min(1000 * 2 ** (attempt - 1), 30_000)
-      process.stderr.write(`telegram channel: polling failed (attempt ${attempt}), retrying in ${delay / 1000}s: ${err}\n`)
+      log(`telegram channel: polling failed (attempt ${attempt}), retrying in ${delay / 1000}s: ${err}`)
       await new Promise(r => setTimeout(r, delay))
     }
   }

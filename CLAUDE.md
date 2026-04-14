@@ -96,6 +96,47 @@ Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine
 
 ---
 
+## Mood Tracking
+
+Log entries to `private-data/mood-tracker.md` whenever Noah reports his mood. Use exact UTC and Pacific times. Mood is free-form text.
+
+**Format:** append a row to the markdown table:
+```
+| 2026-04-14 03:00 UTC | 2026-04-13 20:00 PDT | excellent, focused | beautiful weather |
+```
+
+---
+
+## Alcohol Tracking
+
+Log entries to `private-data/alcohol-tracker.md` whenever Noah reports drinking. Use Pacific date.
+
+**Format:** append a row to the markdown table:
+```
+| 2026-04-13 | evening | medium | wine |
+```
+
+**Time of day options:** `afternoon`, `evening`, `night` (default to `evening` if unspecified).
+
+**Quantity options:** `little`, `medium`, `lot` (use Noah's words or judgment if vague).
+
+**Notes:** optional — type of drink, occasion, etc. Leave blank if nothing notable.
+
+---
+
+## Nicotine Tracking
+
+Log entries to `private-data/nicotine-tracker.md` whenever Noah reports nicotine intake. Use the current time in both UTC and Pacific (default timezone).
+
+**Format:** append a row to the markdown table:
+```
+| 2 | Nicotine Gum 2mg (Polacrilex) | 2026-04-13 18:00 UTC | 2026-04-13 11:00 PDT |
+```
+
+**Default product:** "nicotine gum", "gum", "had a nicotine", or similar without specifying = **2mg Polacrilex nicotine gum (Target)**.
+
+---
+
 ## Google Workspace
 
 - **Gmail**: Use `gws-gmail` / `gws-gmail-read` skills
@@ -150,6 +191,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - **gws-gmail** / **gws-gmail-read** — send and read Gmail
 - **imessage-lookup** — look up iMessages by contact name (resolves name → identifier → chat.db)
 - **contacts-search** — fuzzy-search contacts by name; returns phone numbers / emails
+- **shiori-sh** — save URLs to Shiori and search/list saved bookmarks (`bunx @shiori-sh/cli`)
 - Other Google Workspace skills available at https://github.com/googleworkspace/cli
 
 ### Local Files
@@ -173,6 +215,9 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 
 - `private-data/contacts.md` — private contact notes (addresses, phone numbers, gate codes, etc.); **fuzzy-search this first** whenever Noah asks about a person by name (e.g. "is X in contacts?", "what's X's address?", "do we have notes on X?").
 - `private-data/caffeine-tracker.md` — caffeine intake log; append entries when Noah reports caffeine
+- `private-data/nicotine-tracker.md` — nicotine intake log; append entries when Noah reports nicotine
+- `private-data/alcohol-tracker.md` — alcohol intake log (date, time of day, little/medium/lot); append entries when Noah reports drinking
+- `private-data/mood-tracker.md` — mood log with exact UTC + Pacific timestamps; free-form mood text
 - `private-data/sleep-tracker.md` — sleep log
 - `private-data/things-today-tracker.json` — persistent UUID → first_seen map used by things-today-tracker.py
 - `private-data/event-notes.md` — temporary notes tied to upcoming events (trips, reservations, deadlines, etc.); search this when Noah asks about something specific. Each entry has an expiry date — when expired or the event passes, **move** the entry to `event-notes-archive.md` rather than deleting it.

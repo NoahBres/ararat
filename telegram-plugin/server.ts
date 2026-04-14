@@ -925,6 +925,11 @@ async function transcribeAudio(localPath: string): Promise<string | undefined> {
   }
 }
 
+// Track consecutive MCP delivery failures. If the Claude-side transport is
+// broken or stuck, notifications will throw or hang — exit so Claude respawns
+// the plugin with a fresh MCP connection (and Telegram replays unacked msgs).
+let consecutiveDeliveryFailures = 0
+
 async function handleInbound(
   ctx: Context,
   text: string,
@@ -988,32 +993,47 @@ async function handleInbound(
 
   // image_path goes in meta only — an in-content "[image attached — read: PATH]"
   // annotation is forgeable by any allowlisted sender typing that string.
-  await mcp.notification({
-    method: 'notifications/claude/channel',
-    params: {
-      content: text,
-      meta: {
-        chat_id,
-        ...(msgId != null ? { message_id: String(msgId) } : {}),
-        user: from.username ?? String(from.id),
-        user_id: String(from.id),
-        ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
-        ...(ctx.message?.reply_to_message != null ? {
-          reply_to_message_id: String(ctx.message.reply_to_message.message_id),
-          ...(ctx.message.reply_to_message.text ? { reply_to_text: ctx.message.reply_to_message.text } : {}),
-        } : {}),
-        ...(imagePath ? { image_path: imagePath } : {}),
-        ...(attachment ? {
-          attachment_kind: attachment.kind,
-          attachment_file_id: attachment.file_id,
-          ...(attachment.size != null ? { attachment_size: String(attachment.size) } : {}),
-          ...(attachment.mime ? { attachment_mime: attachment.mime } : {}),
-          ...(attachment.name ? { attachment_name: attachment.name } : {}),
-        } : {}),
+  const DELIVERY_TIMEOUT_MS = 15_000
+  await Promise.race([
+    mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: text,
+        meta: {
+          chat_id,
+          ...(msgId != null ? { message_id: String(msgId) } : {}),
+          user: from.username ?? String(from.id),
+          user_id: String(from.id),
+          ts: new Date((ctx.message?.date ?? 0) * 1000).toISOString(),
+          ...(ctx.message?.reply_to_message != null ? {
+            reply_to_message_id: String(ctx.message.reply_to_message.message_id),
+            ...(ctx.message.reply_to_message.text ? { reply_to_text: ctx.message.reply_to_message.text } : {}),
+          } : {}),
+          ...(imagePath ? { image_path: imagePath } : {}),
+          ...(attachment ? {
+            attachment_kind: attachment.kind,
+            attachment_file_id: attachment.file_id,
+            ...(attachment.size != null ? { attachment_size: String(attachment.size) } : {}),
+            ...(attachment.mime ? { attachment_mime: attachment.mime } : {}),
+            ...(attachment.name ? { attachment_name: attachment.name } : {}),
+          } : {}),
+        },
       },
-    },
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`delivery timed out after ${DELIVERY_TIMEOUT_MS / 1000}s`)), DELIVERY_TIMEOUT_MS),
+    ),
+  ]).then(() => {
+    consecutiveDeliveryFailures = 0
   }).catch(err => {
-    process.stderr.write(`telegram channel: failed to deliver inbound to Claude: ${err}\n`)
+    consecutiveDeliveryFailures++
+    process.stderr.write(
+      `telegram channel: failed to deliver inbound to Claude (${consecutiveDeliveryFailures}/3): ${err}\n`,
+    )
+    if (consecutiveDeliveryFailures >= 3) {
+      process.stderr.write('telegram channel: 3 consecutive delivery failures — exiting for respawn\n')
+      process.exit(1)
+    }
   })
 }
 

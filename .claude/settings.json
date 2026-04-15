@@ -1,11 +1,25 @@
 {
   "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/Developer/ararat/.claude/hooks/telegram-reminder.sh"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "$HOME/Developer/ararat/tools/restore-crons.sh"
+          },
+          {
+            "type": "command",
+            "command": "$HOME/Developer/ararat/tools/notify-startup.sh"
           }
         ]
       }

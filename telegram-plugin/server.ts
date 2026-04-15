@@ -436,9 +436,14 @@ mcp.setNotificationHandler(
     const { request_id, tool_name, description, input_preview } = params
     pendingPermissions.set(request_id, { tool_name, description, input_preview })
     const access = loadAccess()
-    const text = `🔐 Permission: ${tool_name}`
+    let prettyInput: string
+    try {
+      prettyInput = JSON.stringify(JSON.parse(input_preview), null, 2)
+    } catch {
+      prettyInput = input_preview
+    }
+    const text = `🔐 Permission: ${tool_name}\n\n${prettyInput}`
     const keyboard = new InlineKeyboard()
-      .text('See more', `perm:more:${request_id}`)
       .text('✅ Allow', `perm:allow:${request_id}`)
       .text('❌ Deny', `perm:deny:${request_id}`)
     for (const chat_id of access.allowFrom) {

@@ -1107,6 +1107,7 @@ void (async () => {
     try {
       await bot.start({
         onStart: info => {
+          attempt = 0 // reset backoff on successful connect
           botUsername = info.username
           log(`telegram channel: polling as @${info.username}`)
           void bot.api.setMyCommands(
@@ -1121,6 +1122,7 @@ void (async () => {
       })
       return // bot.stop() was called — clean exit from the loop
     } catch (err) {
+      if (shuttingDown) return
       // bot.stop() mid-setup rejects with grammy's "Aborted delay" — expected, not an error.
       if (err instanceof Error && err.message === 'Aborted delay') return
 

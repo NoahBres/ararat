@@ -188,6 +188,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - **CardPointers** — `list_my_cards`, `recommend_card`, `search_my_offers`, `list_my_offers` (credit card recommendations and offers)
 
 ### Skills
+- **ship** — commit all unstaged changes as atomic commits (with secrets scan) and push; triggered by "ship", "ship it", "commit and push"
 - **gws-gmail** / **gws-gmail-read** — send and read Gmail
 - **imessage-lookup** — look up iMessages by contact name (resolves name → identifier → chat.db)
 - **contacts-search** — fuzzy-search contacts by name; returns phone numbers / emails

@@ -70,13 +70,24 @@
         sshUser = "noah";
         user = "root";
         interactiveSudo = true;
-        # Magic rollback needs a *second* sudo'd SSH call to confirm after
-        # activation; with interactive sudo on macOS that step kept failing and
-        # silently reverting good deploys (3x on 2026-09-08). Off: one password,
-        # no confirm round-trip. autoRollback (revert if activation itself
-        # errors) stays on. rtk is reachable via Screen Sharing if a deploy
-        # ever breaks SSH.
-        magicRollback = false;
+        # Magic rollback confirmation was timing out unconditionally on macOS
+        # (repeatedly, 2026-09-08). Root cause: deploy-rs's remote activate-rs
+        # watches `tempPath` (default /tmp) with the `notify` crate for a lock
+        # file to be removed, comparing raw path strings. macOS's FSEvents
+        # backend reports the *canonicalized* path, so events under /tmp
+        # (a symlink to /private/tmp) arrive as /private/tmp/... and never
+        # string-match the /tmp/... lock path deploy-rs is watching for --
+        # confirmation can never succeed, regardless of network speed or sudo
+        # timing. Fix: point tempPath at the already-canonical /private/tmp so
+        # the watched path and the reported path agree.
+        #
+        # (Also fixed in passing: environment.etc."sudoers.d/deploy-rs-tty-tickets"
+        # in hosts/rtk/configuration.nix disables tty_tickets so the
+        # activate/wait/confirm sudo calls share one cached credential instead
+        # of each ssh invocation's own pty needing its own -- not the actual
+        # cause of the timeout, but worth keeping.)
+        magicRollback = true;
+        tempPath = "/private/tmp";
         remoteBuild = false;
         profiles.system.path = deploy-rs.lib.aarch64-darwin.activate.darwin self.darwinConfigurations.rtk;
       };

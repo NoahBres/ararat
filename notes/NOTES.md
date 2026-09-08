@@ -60,17 +60,81 @@ Contacts name resolution), `imessage.send` (write, **off** unless `IMESSAGE_WRIT
 AND recipient in `IMESSAGE_WRITE_ALLOWLIST`; first real send will pop an Automation prompt for
 Messages.app on rtk's screen).
 
-### Auth (two layers)
+### Auth (three layers)
 
 1. **Cloudflare Access** at the edge (team `bold-poetry-9de0`, Zero Trust Free). Access app
    `rtk-api` on `api.noahbres.com`, one policy: Service Auth for service token `rtk-api` (expires
    2027-09-08). Anything without valid `CF-Access-Client-Id`/`-Secret` headers gets 403 before
    reaching rtk. Consequence: clients that can't set custom headers (Claude.ai's connector UI)
    can't use `api.`; that's what the future `mcp.noahbres.com` capability-URL design is for.
-2. **The server itself** accepts a request if the `Cf-Access-Jwt-Assertion` JWT verifies against
-   the team's JWKS with the app's AUD, *or* `Authorization: Bearer $RTK_API_BEARER_TOKEN`
-   (only reachable from localhost now), *or* the path starts with `/$RTK_API_MCP_SECRET/` (MCP,
-   not exposed yet). Failed auth → 401.
+2. **The server authenticates** into a *principal*: a named client token in `X-Rtk-Client-Token`
+   or `Authorization: Bearer` matching `RTK_API_CLIENTS` (scoped), else the `Cf-Access-Jwt-Assertion`
+   JWT verified against the team's JWKS with the app's AUD (principal `owner`, unscoped), else
+   `Authorization: Bearer $RTK_API_BEARER_TOKEN` (`owner`, unscoped, only reachable from localhost
+   now), else the path starts with `/$RTK_API_MCP_SECRET/` (principal `mcp`, unscoped — checked
+   first of all). Failed auth → 401. The client token is deliberately checked **before** the CF JWT:
+   an external client presents both (Access headers to pass the edge, client token for identity),
+   and the scoped identity must win.
+3. **The server authorizes** the principal's fnmatch allowlist against the tool name. Denied → 403
+   (not 401 — the caller *is* authenticated). `GET /v1/tools` is filtered to the grant, and an
+   unknown tool outside the grant returns 403 rather than 404, so a scoped client can't enumerate
+   the registry.
+
+**Why the client token and not the Access JWT's `common_name` claim.** Service-token JWTs are
+believed to carry the client id in `common_name`, which would let the server distinguish tokens
+without a second credential — but the only way to confirm the claim's shape is to patch `auth.py`
+on a live rtk (the JWT exists only in flight; nothing echoes headers). Not worth the risk when a
+client token we control works regardless. Two header spellings are accepted because Cloudflare
+Access has a history of being fussy about forwarding `Authorization` to the origin;
+`X-Rtk-Client-Token` passes through cleanly and is preferred. Which one actually fires is visible
+as `principal` in the access log.
+
+**Scoped clients.** `RTK_API_CLIENTS` is a JSON map, name → `{token, allow, require_approval}`,
+with fnmatch patterns over tool names. Malformed JSON fails closed (no clients, error logged)
+rather than crashing the server, so a bad edit can't lock the owner out. Full docs:
+`rtk-api/README.md`.
+
+#### Planned: `instinct`
+
+`instinct` is Noah's iMessage agent, running **in the cloud** (not on rtk), so it must come through
+Cloudflare Access. Intended grant: all of `things.*` (read + write, ungated) and `imessage.*` reads,
+with `imessage.send` gated behind approval. It needs **its own Access service token** — not for
+identity (the client token does that) but for revocation: a separate token can be cut at the edge
+without invalidating Noah's own access, and it keeps the Cloudflare audit log legible.
+
+Not yet created: instinct's service token, its client token, the `RTK_API_CLIENTS` entry on rtk.
+
+#### Planned: approval queue (`require_approval`) — designed, not built
+
+`require_approval` is honored in code today only as a refusal: it is checked *before* `allow` and
+overrides it, so a listed tool returns 403 instead of running unattended. The intended mechanism:
+
+- `imessage.send` → server persists a pending approval and returns `202 {"ok": false, "status":
+  "pending", "approval_id": ...}`; the caller polls. **Not** a blocking wait — the threadpool exists
+  precisely so no call can freeze `/health`, and a cloud agent's HTTP client would time out before
+  Noah reached his phone anyway.
+- Notification goes out over a **dedicated second Telegram bot**, polled from inside the rtk-api
+  process. Telegram allows exactly one `getUpdates` consumer per token (see
+  `telegram-plugin/server.ts:79`, and the 409 handling at :1101), so rtk-api cannot receive button
+  callbacks on ararat's bot — ararat's poller owns them. It could *send* through ararat's bot, but
+  ararat's poller only runs while that Claude session runs, and restarting ararat is routine; a bot
+  polled by rtk-api is up exactly when rtk-api is up. Rejected alternative: patching the plugin's
+  `callback_query` handler to forward an `rtk:` prefix to localhost — same availability coupling,
+  plus it forks a vendored upstream.
+- The inline-keyboard Allow/Deny UX already exists in the plugin (`server.ts:436-452`, callback at
+  :736) and is worth copying — **including** its sender check at :746. Authorize on `ctx.from.id`,
+  not `chat_id`: Telegram bots are discoverable by username, so an unauthenticated Allow button is
+  a human gate any stranger can press.
+- Persist the pending queue to `~/.local/state/rtk-api/` (where `audit.log` already lives) and
+  reconcile on boot. rtk-api is a daemon that gets redeployed; an in-memory map would silently drop
+  every in-flight approval on restart.
+- Keep `IMESSAGE_WRITE_ALLOWLIST` enforced *underneath* approvals. Approval decides "this message";
+  the allowlist decides "this recipient is ever reachable at all". Both, not either.
+- Resolve the recipient through `contacts.lookup_name` when composing the prompt. Approving
+  "send to +1555…" tells you nothing; "send to Kirill" tells you everything.
+- **Do the Messages.app Automation grant first, as a separate step over Screen Sharing.** The first
+  real send pops a TCC prompt on rtk's screen, and TCC prompts block silently under launchd. Wiring
+  approvals and flipping `IMESSAGE_WRITE_ENABLED` in one change stacks two invisible hangs.
 
 ### Credentials index (all in 1Password, Private vault)
 
@@ -84,7 +148,8 @@ Messages.app on rtk's screen).
 
 Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git):
 `RTK_API_BEARER_TOKEN`, `RTK_API_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`,
-`THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`.
+`THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`, and optionally
+`RTK_API_CLIENTS`.
 
 ### Cloudflare objects (account `b912898d014811a465b4b3bf29ba9c0b`, zone `1a485d0b081c74cfe34537c498114b55`)
 
@@ -150,7 +215,7 @@ prompts for rtk's password. Consequence: **nix deploys are human-only**; agents 
 
 **How it works:** builds the rtk closure on rnn (`remoteBuild = false`), `nix copy`s it over the
 `rtk` SSH alias, activates via `sudo` on rtk. `autoRollback` is on (revert if activation itself
-errors). **`magicRollback` is OFF** — see gotchas.
+errors). `magicRollback` is **on** (fixed 2026-09-08 — see gotchas for the actual bug and fix).
 
 **SSH aliases** (`nixos-config/hosts/common/darwin/home.nix`):
 - `rtk` — preferred. ProxyCommand script tries the LAN/Tailscale path (`rtk.local`) first, falls
@@ -182,10 +247,23 @@ The "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys th
 - *verify after deploy* → `ssh rtk 'readlink /nix/var/nix/profiles/system; launchctl list | grep noahbres; curl -s localhost:8787/health'`.
 
 **Gotchas:**
-- **Magic rollback is disabled.** Its confirm step is a second sudo'd SSH call; under interactive
-  sudo it kept failing and silently reverting good deploys (three times on 2026-09-08 — the box
-  looked "deployed" but was on the old generation, and the failed generations were deleted). Tell
-  is `readlink /nix/var/nix/profiles/system` not advancing. If a deploy ever breaks SSH, Screen
+- **Magic rollback timed out on every deploy (2026-09-08), root cause found and fixed.**
+  `activate-rs` (deploy-rs's remote activation binary) confirms success by creating a lock file
+  under `tempPath` (default `/tmp`) and watching that directory with the `notify` crate for the
+  lock file to be *removed* — the local deploy-rs CLI does the removing over a second sudo'd SSH
+  call. On macOS, `notify`'s FSEvents backend reports the *canonicalized* path, so events under
+  `/tmp` (a symlink to `/private/tmp`) arrive as `/private/tmp/...` and never string-match the
+  `/tmp/...` path the watcher is holding — confirmation can structurally never succeed, regardless
+  of network speed or sudo timing. **Fix:** `tempPath = "/private/tmp";` on `deploy.nodes.rtk` in
+  `flake.nix`, so the watched path and the reported path are already the same string. Two other
+  things got fixed alongside this while chasing the bug (real issues, just not *the* cause):
+  `packages.aarch64-darwin.deploy-rs` now comes from the `deploy-rs` flake input directly instead
+  of nixpkgs, so the local CLI and the remote activation lib are always the same version; and
+  `environment.etc."sudoers.d/deploy-rs-tty-tickets"` in `hosts/rtk/configuration.nix` disables
+  macOS sudo's `tty_tickets` so the activate/wait/confirm sudo calls (each its own SSH session, own
+  pty) can share one cached credential.
+- If a deploy ever silently reverts again, tell is `readlink /nix/var/nix/profiles/system` not
+  advancing after activation looked like it ran. If a deploy ever breaks SSH outright, Screen
   Sharing is the way in.
 - **Don't deploy over the Cloudflare tunnel.** A deploy that changes the `cloudflared` plist
   restarts cloudflared and drops the tunnel mid-deploy. The `rtk` alias avoids this on the LAN;
@@ -195,8 +273,6 @@ The "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys th
   `waitForNixStore = false`, which swaps in a launcher script named after the agent; safe because
   user agents start after login, when the store is long mounted. Two remaining "sh" entries are
   not ours: `org.nixos.activate-system` (nix-darwin) and `systems.determinate.nix-installer.nix-hook`.
-- deploy-rs CLI comes from nixpkgs (binary-cached); the activation lib from the flake input. A
-  version-mismatch warning between them is harmless.
 - The old `~/Developer/nixos-config` checkout on rtk is stale (pre-merge); the live config is
   `~/Developer/ararat/nixos-config`. The stale one can be deleted.
 

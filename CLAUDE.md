@@ -198,9 +198,13 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 ### Local Files
 
 **`notes/`**
+- `notes/plans/hometools-api.md` — implementation plan for the `hometools` personal API/MCP server on rtk (api.noahbres.com / mcp.noahbres.com); read before working on that project
 - `notes/SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
 - `notes/NOTES.md` — project implementation notes (Telegram plugin setup, etc.)
 - `notes/llm-projects.md` — curated list of interesting LLM-related projects
+
+**`hometools/`**
+- Private authenticated HTTP/MCP server for personal tools (Things 3, iMessage), deployed on `rtk` as `api.noahbres.com` / `mcp.noahbres.com`. See `notes/plans/hometools-api.md` (plan) and `notes/NOTES.md` (hometools section) for details; `hometools/README.md` for dev usage.
 
 **`tools/`**
 - `tools/send-cmd.sh` — sends a slash command to the Ararat remote control session (e.g. `/clear`, `/model haiku`)
@@ -209,6 +213,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - `tools/things-today-tracker.md` — documentation for the things-today-tracker script (launchd schedule, usage, data store location)
 - `tools/imessage-query.py` — queries chat.db for messages by phone/email identifier; used by the imessage-lookup skill
 - `tools/contacts-search.py` — fuzzy-searches AddressBook contacts by name; used by the contacts-search skill
+- `hometools/deploy.sh` — deploys hometools on `rtk` (git pull, `uv sync --frozen`, restart launchd agent, poll `/health`); `--remote` runs it over SSH from `rnn`
 
 **`private-data/`** (gitignored)
 
@@ -223,6 +228,12 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - `private-data/things-today-tracker.json` — persistent UUID → first_seen map used by things-today-tracker.py
 - `private-data/event-notes.md` — temporary notes tied to upcoming events (trips, reservations, deadlines, etc.); search this when Noah asks about something specific. Each entry has an expiry date — when expired or the event passes, **move** the entry to `event-notes-archive.md` rather than deleting it.
 - `private-data/event-notes-archive.md` — cold storage for expired event notes. Do NOT load this proactively — only search it if Noah explicitly asks about something historical.
+
+---
+
+## nixos-config
+
+`nixos-config/` is a nix-darwin config, merged into this repo as a subfolder (history preserved). Use it whenever Noah asks about Nix, nix-darwin, or system/host configs. Key paths: `nixos-config/flake.nix`, `nixos-config/hosts/` (per-host configs, e.g. `hosts/common/darwin/home.nix`).
 
 ---
 

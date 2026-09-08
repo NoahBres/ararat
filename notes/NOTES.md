@@ -26,3 +26,40 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname %h" noah@ssh-rtk.noahbres
 ```
 
 Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separate Cloudflare Access login/service-token step needed since no Access policy is enforced.
+
+## hometools (api.noahbres.com / mcp.noahbres.com)
+
+`hometools` is a private, authenticated HTTP surface running on `rtk` that exposes personal
+"tools" (Things 3, iMessage, etc.) to AI agents over REST and MCP. Full design: see
+`notes/plans/hometools-api.md`. Usage/dev docs: `hometools/README.md`.
+
+- **Hostnames**: `api.noahbres.com` (REST, Cloudflare Access service-token auth) and
+  `mcp.noahbres.com` (MCP, capability-URL auth: `https://mcp.noahbres.com/<secret>/mcp`).
+  Both route through the existing `rtk` Cloudflare Tunnel to one local process.
+- **Port**: `127.0.0.1:8787` on `rtk` only — never bound publicly; all ingress is via the tunnel.
+- **Secrets**: `~/.config/hometools/env` on `rtk` (`chmod 600`, gitignored, never committed).
+  Holds `HOMETOOLS_BEARER_TOKEN`, `HOMETOOLS_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`,
+  `CF_ACCESS_AUD`, `THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`.
+  Also backed up in 1Password (item `hometools`).
+- **launchd**: `com.noahbres.hometools`, defined in `nixos-config/hosts/rtk/home.nix`
+  (modelled on `things-today-tracker` / `ararat`). Runs
+  `uv run --frozen hometools serve --host 127.0.0.1 --port 8787` from
+  `~/Developer/ararat/hometools`, sourcing the secrets file first. Logs: `/tmp/hometools.log`,
+  `/tmp/hometools-error.log`.
+- **Aliases** (on `rtk`): `restart-hometools`, `kill-hometools`, `hometools-log`.
+- **Deploy**: `hometools/deploy.sh` — pulls, `uv sync --frozen`, kicks the launchd agent, polls
+  `/health`. Run directly on `rtk`, or `hometools/deploy.sh --remote` from `rnn` (SSHes in via
+  `rtk-cloudflare`). Re-apply the nix config (`just switch-rtk` in `nixos-config/`) only when
+  `home.nix` itself changes.
+- **Manual Phase 0 steps** (Noah only — see plan §3 for full detail):
+  1. Add `api.noahbres.com` and `mcp.noahbres.com` as public hostnames on the `rtk` Cloudflare
+     Tunnel → `localhost:8787`.
+  2. Put Cloudflare Access (service token) in front of `api.noahbres.com`; note the AUD tag and
+     team domain.
+  3. Do **not** put Access on `mcp.noahbres.com` (Claude.ai can't send custom headers) — add a
+     rate-limit rule there instead.
+  4. Create `~/.config/hometools/env` on `rtk` with the variables listed above.
+  5. Grant Full Disk Access to the uv-managed Python (needed for iMessage only) via Screen
+     Sharing on `rtk`.
+  6. If iMessage write is ever enabled, approve the Automation/TCC prompt for Messages.app via
+     Screen Sharing.

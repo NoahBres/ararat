@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """
+Canonical copy of this logic now lives in
+hometools/src/hometools/lib/contacts.py -- fix bugs there, this script is
+just a standalone CLI wrapper kept for casual ad-hoc use.
+
 Fuzzy search contacts across all AddressBook databases.
 
 Usage:

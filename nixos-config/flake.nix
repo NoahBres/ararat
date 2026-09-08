@@ -16,6 +16,9 @@
     determinate.url = "https://flakehub.com/f/DeterminateSystems/determinate/3";
 
     git-hooks.url = "github:cachix/git-hooks.nix";
+
+    deploy-rs.url = "github:serokell/deploy-rs";
+    deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -28,6 +31,7 @@
       llm-agents,
       determinate,
       git-hooks,
+      deploy-rs,
       ...
     }:
     {
@@ -55,10 +59,28 @@
 
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt-tree;
 
-      checks.aarch64-darwin.pre-commit-check = git-hooks.lib.aarch64-darwin.run {
-        src = ./.;
-        hooks.nixfmt.enable = true;
+      # Remote deploy to the headless Mac mini: `just deploy-rtk` (see justfile).
+      # Builds the rtk closure locally, copies it over the Cloudflare-tunnel SSH
+      # alias, activates with interactive sudo (no NOPASSWD needed), and rolls
+      # back automatically if it can't reconnect afterwards (magic rollback).
+      deploy.nodes.rtk = {
+        hostname = "rtk-cloudflare"; # ssh alias from hosts/common/darwin/home.nix
+        sshUser = "noah";
+        user = "root";
+        interactiveSudo = true;
+        remoteBuild = false;
+        profiles.system.path = deploy-rs.lib.aarch64-darwin.activate.darwin self.darwinConfigurations.rtk;
       };
+
+      packages.aarch64-darwin.deploy-rs = nixpkgs.legacyPackages.aarch64-darwin.deploy-rs; # binary-cached, same CLI
+
+      checks.aarch64-darwin = {
+        pre-commit-check = git-hooks.lib.aarch64-darwin.run {
+          src = ./.;
+          hooks.nixfmt.enable = true;
+        };
+      }
+      // (deploy-rs.lib.aarch64-darwin.deployChecks self.deploy);
 
       devShells.aarch64-darwin.default =
         let

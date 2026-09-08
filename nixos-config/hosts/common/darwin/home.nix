@@ -67,6 +67,22 @@ in
 
     atuin.enable = true;
 
+    ssh = {
+      enable = true;
+      enableDefaultConfig = false;
+      settings = {
+        "*" = {
+          hashKnownHosts = false;
+          userKnownHostsFile = "~/.ssh/known_hosts";
+        };
+        rtk-cloudflare = {
+          hostname = "ssh-rtk.noahbres.com";
+          user = "noah";
+          proxyCommand = "cloudflared access ssh --hostname %h";
+        };
+      };
+    };
+
     zsh = {
       enable = true;
 
@@ -117,6 +133,7 @@ in
 
       llm-agents.claude-code
       llm-agents.opencode
+      llm-agents.agent-browser
 
       # Google CLI
       google-cloud-sdk

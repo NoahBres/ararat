@@ -12,6 +12,10 @@ dots across sessions rather than answering narrowly.
 > plugin, the `--remote-control` shim, and the `com.noahbres.ararat` launchd agent are all
 > gone; the trackers and `private-data/` live on and are updated from normal sessions. See
 > git history for the removed pieces.
+>
+> **Do not delete `~/.claude/channels/telegram/.env`.** The bot token there is independent
+> of the retired remote-control session, and `tools/things-today-tracker.py` still reads it
+> to send its daily stale-task alert.
 
 ---
 

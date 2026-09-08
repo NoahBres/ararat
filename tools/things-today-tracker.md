@@ -12,7 +12,9 @@ Tracks how long tasks have been sitting in Things 3 "Today" and sends a Telegram
 ## Key files
 - **Script:** `tools/things-today-tracker.py`
 - **Data store:** `private-data/things-today-tracker.json` (gitignored — persists across sessions)
-- **Bot token:** read from `~/.claude/channels/telegram/.env` (TELEGRAM_BOT_TOKEN)
+- **Bot token:** read from `~/.claude/channels/telegram/.env` (TELEGRAM_BOT_TOKEN).
+  This outlives the retired Ararat assistant on purpose — the token is independent of
+  that session, so this alert kept working when the bot was torn down. Don't clean it up.
 - **launchd agent:** defined in `~/Developer/nixos-config/hosts/rtk/home.nix` as `launchd.agents.things-today-tracker`
   - Label: `com.noahbres.things-today-tracker`
   - Schedule: daily at 9:07am

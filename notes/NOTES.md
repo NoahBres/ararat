@@ -51,14 +51,17 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
   `/health`. Run directly on `rtk`, or `rtk-api/deploy.sh --remote` from `rnn` (SSHes in via
   `rtk-cloudflare`). Re-apply the nix config (`just deploy-rtk` from `rnn`, see "Deploying nix config to `rtk`"
   below) only when `home.nix` itself changes.
-- **Cloudflare state (as of 2026-09-08)**: tunnel `ararat` (id `a1428f1d-04a1-496f-a8f0-18bc7ee54152`,
-  account `b912898d014811a465b4b3bf29ba9c0b`) has ingress `api.noahbres.com -> http://localhost:8787`
-  and a proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`, both created via API. **Cloudflare
-  Access is NOT enabled on the account yet** (dashboard-only "Enable Access" step), so `api.` is
-  protected by the rtk-api bearer token alone (TLS + 256-bit random token, constant-time compare).
-  `mcp.noahbres.com` not created yet. API tokens in 1Password: `cloudflare-token-creator` (can mint
-  tokens) and `cloudflare-rtk-api-token` (scoped: Tunnel/Access/DNS/WAF on noahbres.com, expires
-  2026-10-08). Bearer token + MCP secret: 1Password item `rtk-api`.
+- **Cloudflare state (as of 2026-09-08, evening)**: tunnel `ararat` (id
+  `a1428f1d-04a1-496f-a8f0-18bc7ee54152`, account `b912898d014811a465b4b3bf29ba9c0b`) has ingress
+  `api.noahbres.com -> http://localhost:8787` and a proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`.
+  **Cloudflare Access is enabled** (team `bold-poetry-9de0`, Zero Trust Free). Access app `rtk-api`
+  on `api.noahbres.com` with one policy: Service Auth for service token `rtk-api` (expires
+  2027-09-08). Callers send `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers (1Password:
+  `rtk-api cloudflare access service token`). Unauthenticated and bearer-only requests get 403 at the
+  edge; the server additionally verifies the `Cf-Access-Jwt-Assertion` JWT (`CF_ACCESS_TEAM_DOMAIN`
+  + `CF_ACCESS_AUD` in `~/.config/rtk-api/env`). The bearer token (`rtk-api` in 1Password) still
+  works from localhost / behind the edge. `mcp.noahbres.com` not created yet. Cloudflare API tokens
+  in 1Password: `cloudflare-token-creator`, `cloudflare-rtk-api-token` (expires 2026-10-08).
 - **Status 2026-09-08**: deployed (gen 46), FDA granted to `~/Applications/rtk-api.app`; Things read/write and
   all iMessage read tools verified end-to-end through `api.noahbres.com`. iMessage send still off.
 - **TCC gotcha**: under launchd, first access to another app's container (Things group container,

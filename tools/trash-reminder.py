@@ -274,7 +274,11 @@ def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool
     """
     import time
 
-    ascii_snippet = re.sub(r"[^\x20-\x7e]", "", text).strip()[:60]
+    # The blob holds raw UTF-8, so only a contiguous ASCII run from the text
+    # can match it with LIKE (an emoji in the middle breaks contiguity).
+    ascii_runs = re.findall(r"[\x20-\x7e]{10,}", text)
+    snippet = max(ascii_runs, key=len).strip() if ascii_runs else text[:60]
+    snippet = snippet.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     deadline = time.monotonic() + 5.0
     since_ns = int((since.timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
     while time.monotonic() < deadline:
@@ -287,12 +291,12 @@ def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool
                    JOIN chat c ON c.ROWID = cmj.chat_id
                    JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
                    JOIN handle h ON h.ROWID = chj.handle_id
-                   WHERE h.id LIKE :n AND m.is_from_me = 1
+                    WHERE h.id LIKE :n AND m.is_from_me = 1
                      AND m.date >= :since
-                     AND (m.text LIKE :q OR CAST(m.attributedBody AS TEXT) LIKE :q)
-                   LIMIT 1""",
+                     AND (m.text LIKE :q ESCAPE '\' OR CAST(m.attributedBody AS TEXT) LIKE :q ESCAPE '\')
+                    LIMIT 1""",
                 {"n": f"%{numbers[0]}%", "since": since_ns,
-                 "q": f"%{ascii_snippet}%"},
+                 "q": f"%{snippet}%", "escape": "\\"},
             ).fetchone()
             if row is not None:
                 return True
@@ -376,7 +380,7 @@ PROVISIONAL_TPL = (
     "[BOT] 🗑️ Trash heads-up: {name} is up for {day} pickup. "
     "Reply 'bot skip me' to pass (Noah can 'bot skip <name>')."
 )
-FINAL_TPL = "[BOT] 🗑️ Trash reminder: {name}, you're up — bins out by 6am {day}!{skipped}"
+FINAL_TPL = "[BOT] 🗑️ Trash reminder: {name}, you're up for {day} pickup!{skipped}"
 
 
 def main() -> None:

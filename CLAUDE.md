@@ -235,9 +235,13 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 
 `nixos-config/` is a nix-darwin config, merged into this repo as a subfolder (history preserved). Use it whenever Noah asks about Nix, nix-darwin, or system/host configs. Key paths: `nixos-config/flake.nix`, `nixos-config/hosts/` (per-host configs, e.g. `hosts/common/darwin/home.nix`).
 
+**Running its `just` recipes:** the root `justfile` exposes `nixos-config/justfile` as a module, so
+every recipe is callable from the repo root as `just nix <recipe>` (e.g. `just nix build-rtk`) and
+runs with `nixos-config/` as its working directory. `just` alone lists them.
+
 **Deploying to rtk:** nix changes to rtk go through deploy-rs and need Noah's sudo password, so
-agents never run `just deploy-rtk` themselves. Prepare and verify (`just build-rtk`, `nix eval`),
-then ask Noah to run `just build-deploy-rtk`, and confirm afterwards over SSH (`readlink
+agents never run `just nix deploy-rtk` themselves. Prepare and verify (`just nix build-rtk`, `nix
+eval`), then ask Noah to run `just nix build-deploy-rtk`, and confirm afterwards over SSH (`readlink
 /nix/var/nix/profiles/system` must advance — silent rollbacks have happened). Python-only changes
 to rtk-api deploy without root via `rtk-api/deploy.sh --remote`. Full notes: `notes/NOTES.md`.
 

@@ -28,8 +28,9 @@ the trackers.
 `tools/things-today-tracker.py` — the daily 09:07 launchd job on `rtk`
 (`com.noahbres.things-today-tracker`) that flags Things 3 "Today" tasks sitting for 10+ days
 and DMs about them. **It still works,** because the bot token is independent of the retired
-remote-control session: it posts straight to the Bot API with a hardcoded chat id. Kept on
-purpose. Don't delete `~/.claude/channels/telegram/.env`.
+remote-control session: it posts straight to the Bot API, reading `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` from `~/.claude/channels/telegram/.env` (the chat id itself is recorded in
+`private-data/infra-ids.md`). Kept on purpose. Don't delete that `.env`.
 
 The rtk-api approval bot is a *separate* Telegram bot with its own token, also still live —
 see `rtk-api/notes/NOTES.md`.
@@ -73,8 +74,8 @@ The architecture, in the order a message flowed:
 2. `git show b610057:.claude/settings.json` and restore the `hooks` block (Stop +
    SessionStart), which was edited rather than deleted.
 3. `git show b610057:nixos-config/hosts/rtk/home.nix` — reinstate `araratatStart`,
-   `launchd.agents.ararat`, and the three aliases. Then `just nix build-rtk`, and have Noah
-   run `just nix build-deploy-rtk` (deploy needs his sudo).
+    `launchd.agents.ararat`, and the three aliases. Then `just build-rtk`, and have Noah
+    run `just build-deploy-rtk` (deploy needs his sudo).
 4. `git show b610057:CLAUDE.md` for the EA persona, model-escalation strategy, and Telegram
    communication rules.
 5. `cd telegram-plugin && bun install`.

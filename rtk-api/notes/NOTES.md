@@ -39,7 +39,8 @@ Messages.app on rtk's screen).
 
 ## Auth (three layers)
 
-1. **Cloudflare Access** at the edge (team `bold-poetry-9de0`, Zero Trust Free). Access app
+1. **Cloudflare Access** at the edge (team domain `<team>.cloudflareaccess.com`, see
+   `private-data/infra-ids.md`; Zero Trust Free). Access app
    `rtk-api` on `api.noahbres.com`, one policy: Service Auth for service token `rtk-api` (expires
    2027-09-08). Anything without valid `CF-Access-Client-Id`/`-Secret` headers gets 403 before
    reaching rtk. Consequence: clients that can't set custom headers (Claude.ai's connector UI)
@@ -90,9 +91,9 @@ without invalidating Noah's own access, and it keeps the Cloudflare audit log le
 | `rtk-api cloudflare access service token - instinct` | `CF-Access-Client-Id` / `-Secret` | edge: get past Cloudflare Access |
 | `rtk-api client token - instinct` | `X-Rtk-Client-Token` | identity: principal name + tool allowlist |
 
-Cloudflare service token `instinct`: id `0af04103-1252-4cc6-8a52-043db7a9f534`, client id
-`5ad5218951c516d0aded3f646fde4193.access`, expires **2027-09-08**. Given its **own** Access policy
-(`instinct service token`, id `75b4e86f-3b2d-4081-8eef-e8be55ea12c8`) on the `rtk-api` app rather
+Cloudflare service token `instinct` (token id and client id in `private-data/infra-ids.md`),
+expires **2027-09-08**. Given its **own** Access policy
+(`instinct service token`, policy id in `private-data/infra-ids.md`) on the `rtk-api` app rather
 than being added to the existing policy's includes — a separate policy means revoking instinct is
 deleting one object, with zero risk to Noah's own token. The two `non_identity` policies are OR'd;
 verified 2026-09-08 that both tokens get a 200 on `/health` and that no credentials still gets 403.
@@ -118,7 +119,7 @@ Access credentials, presented without its client token, would fall through to un
 silently defeating the grant instinct was supposed to get.
 
 Fixed by pinning the JWT path to one `common_name` (`CF_ACCESS_OWNER_COMMON_NAME`, set to the
-owner's own service token's client id, `2c588fc49cfce3d132d32801420984e7.access`) — see
+owner's own service token's client id, `<client-id>.access` — value in `private-data/infra-ids.md`) — see
 [Auth (three layers)](#auth-three-layers) above and `README.md`'s Auth section. Re-verified after
 this fix: Access-headers-only on `/v1/things/list` now 401s; Access + client token still 200s as
 before. Tests added in `tests/test_auth.py` (`test_cf_jwt_owner_common_name_grants_owner`,
@@ -175,17 +176,19 @@ Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git)
 `THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`, and optionally
 `RTK_API_CLIENTS`.
 
-## Cloudflare objects (account `b912898d014811a465b4b3bf29ba9c0b`, zone `1a485d0b081c74cfe34537c498114b55`)
+## Cloudflare objects
 
-- Tunnel `ararat` (`a1428f1d-04a1-496f-a8f0-18bc7ee54152`), remote-managed by token in
+Account id, zone id, and every object id below live in `private-data/infra-ids.md` (gitignored).
+
+- Tunnel `ararat` (id in `infra-ids.md`), remote-managed by token in
   `/etc/cloudflared/tunnel-token` on rtk. Ingress: `ssh-rtk.noahbres.com -> ssh://localhost:22`,
   `api.noahbres.com -> http://localhost:8787`. Public hostnames live in the Zero Trust dashboard /
   API, not in a local `config.yml`.
-- DNS: proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`.
-- Access app `rtk-api` (id `da3dac84-f213-433f-9b08-63a065f6a848`) on `api.noahbres.com`, with two
-  `non_identity` policies, one per service token: `rtk-api service token` (token
-  `1f62f28c-b73e-469a-8eaa-9dc256fe54a7`, expires 2027-09-08) and `instinct service token` (token
-  `0af04103-1252-4cc6-8a52-043db7a9f534`, expires 2027-09-08). One policy per client, so each can
+- DNS: proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com` (exact target in `infra-ids.md`).
+- Access app `rtk-api` (app id in `infra-ids.md`) on `api.noahbres.com`, with two
+  `non_identity` policies, one per service token: `rtk-api service token` (expires 2027-09-08) and
+  `instinct service token` (expires 2027-09-08); token ids and policy ids in `infra-ids.md`.
+  One policy per client, so each can
   be revoked independently. `ssh-rtk.noahbres.com` still has **no** Access policy (SSH keys are the
   only guard there).
 - Not created: `mcp.noahbres.com`, WAF rate-limit rules.
@@ -228,7 +231,8 @@ Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git)
   launchd.
 - `things.search` only returns incomplete items by default.
 - The service-token JWT check needs outbound HTTPS from rtk to
-  `bold-poetry-9de0.cloudflareaccess.com/cdn-cgi/access/certs` (cached after first fetch).
+  `<team>.cloudflareaccess.com/cdn-cgi/access/certs` (team domain in `private-data/infra-ids.md`;
+  cached after first fetch).
 
 ## Not done / future
 

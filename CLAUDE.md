@@ -160,6 +160,7 @@ drift apart again.
 - `private-data/sleep-tracker.md` — sleep log
 - `private-data/supplement-tracker.md` — supplement log (amount, supplement, UTC + Pacific, notes); half serving = 50% of the labeled serving
 - `private-data/things-today-tracker.json` — persistent UUID → first_seen map used by things-today-tracker.py
+- `private-data/infra-ids.md` — concrete infrastructure identifiers (Cloudflare account/zone/tunnel/Access app/policy/service-token ids, Access team domain, DNS record ids, Tailscale tailnet + IPs, Noah's Telegram chat id); consult it whenever a note says "see infra-ids.md" or you need a literal id for a Cloudflare/Tailscale/Telegram API call
 - `private-data/event-notes.md` — temporary notes tied to upcoming events (trips, reservations, deadlines, etc.); search this when Noah asks about something specific. Each entry has an expiry date — when expired or the event passes, **move** the entry to `event-notes-archive.md` rather than deleting it.
 - `private-data/event-notes-archive.md` — cold storage for expired event notes. Do NOT load this proactively — only search it if Noah explicitly asks about something historical.
 
@@ -169,13 +170,13 @@ drift apart again.
 
 `nixos-config/` is a nix-darwin config, merged into this repo as a subfolder (history preserved). Use it whenever Noah asks about Nix, nix-darwin, or system/host configs. Key paths: `nixos-config/flake.nix`, `nixos-config/hosts/` (per-host configs, e.g. `hosts/common/darwin/home.nix`).
 
-**Running its `just` recipes:** the root `justfile` exposes `nixos-config/justfile` as a module, so
-every recipe is callable from the repo root as `just nix <recipe>` (e.g. `just nix build-rtk`) and
-runs with `nixos-config/` as its working directory. `just` alone lists them.
+**Running its `just` recipes:** the root `justfile` imports `nixos-config/justfile`,
+so every nix recipe is callable by its plain name from the repo root (e.g. `just build-rtk`)
+or from inside `nixos-config/` — same file, same names, can't drift. `just` alone lists them.
 
 **Deploying to rtk:** nix changes to rtk go through deploy-rs and need Noah's sudo password, so
-agents never run `just nix deploy-rtk` themselves. Prepare and verify (`just nix build-rtk`, `nix
-eval`), then ask Noah to run `just nix build-deploy-rtk`, and confirm afterwards over SSH (`readlink
+agents never run `just deploy-rtk` themselves. Prepare and verify (`just build-rtk`, `nix
+eval`), then ask Noah to run `just build-deploy-rtk`, and confirm afterwards over SSH (`readlink
 /nix/var/nix/profiles/system` must advance — silent rollbacks have happened). Python-only changes
 to rtk-api deploy without root via `rtk-api/deploy.sh --remote`. Full notes: `notes/NOTES.md`
 (host/deploy) and `rtk-api/notes/NOTES.md` (the service itself).

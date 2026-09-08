@@ -131,6 +131,12 @@ Nix's "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys 
   mismatch warning between the two is expected and harmless.
 
 **Gotchas:**
+- **Don't deploy over the Cloudflare tunnel.** Learned 2026-09-08: a deploy that changes the
+  `cloudflared` agent's plist makes home-manager restart cloudflared, which drops the tunnel, which
+  kills deploy-rs's SSH session, so it can't confirm and magic rollback reverts the whole deploy
+  (and deletes the generation). Two deploys in a row silently rolled back this way. The `rtk`
+  alias avoids this on the LAN; off-LAN use `rtk-ts` (pure Tailscale, `rtk.taile4ea05.ts.net`)
+  rather than letting it fall back to Cloudflare, or pass `--magic-rollback false` knowingly.
 - The old `switch-rtk` recipe used to SSH to `rtk.local` and run `just switch` in
   `~/Developer/nixos-config` — that path is the pre-merge standalone checkout on rtk and is stale.
   The live config is `~/Developer/ararat/nixos-config`. The stale checkout can be deleted.

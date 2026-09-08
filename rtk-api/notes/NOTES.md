@@ -240,9 +240,6 @@ Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git)
 - The approval queue for `imessage.send` (designed above, not built).
 - `things-today-tracker` still runs as bare `/usr/bin/python3` and triggers its own "uvx" TCC
   prompts; could be routed through the same launcher.
-- Actually handing instinct its two credentials — scoping is deployed and verified (including the
-  `common_name` fix), so this is unblocked, just not yet done.
-
 ### Bootstrap discovery: `GET /v1/help` (2026-09-08)
 
 Added so a brand-new agent (instinct, or any future scoped client) can be handed just its two
@@ -253,5 +250,14 @@ Tools outside the caller's `allow` are invisible on both endpoints, same as befo
 (`require_approval`) tools that are otherwise in-grant get their own "Gated" section instead of
 being silently omitted, so an agent understands *why* it can't call them rather than guessing at a
 403. Default is raw `text/markdown`; `Accept: application/json` wraps it in the usual envelope.
-Not yet deployed to rtk — needs `rtk-api/deploy.sh --remote` before instinct (or anyone) can hit it
-live.
+Deployed via `rtk-api/deploy.sh --remote` and verified live against `api.noahbres.com`.
+
+**instinct is fully live, 2026-09-08.** `RTK_API_CLIENTS` on rtk already had instinct's grant
+configured (matching the token in 1Password); the agent just needed a restart
+(`launchctl kickstart -k gui/$UID/com.noahbres.rtk-api`) to pick it up after the settings cache was
+last populated. Verified against the public URL: `X-Rtk-Client-Token` (instinct's) + Cloudflare
+Access headers → principal `instinct`; `/v1/help` renders instinct's scoped doc; `/v1/tools`
+returns exactly its grant (`things.*` + the five iMessage reads, no `imessage.send`, no
+`system.*`). Remaining step for instinct itself: point it at `https://api.noahbres.com/v1/help`
+with its two credentials as its starting point (its own dedicated Cloudflare Access service token,
+plus its `X-Rtk-Client-Token` — both in 1Password, see the credentials table above).

@@ -4,7 +4,7 @@
 -- own System Settings -> Trackpad gestures.
 
 local GHOSTTY_BUNDLE_ID = "com.mitchellh.ghostty"
-local SWIPE_THRESHOLD = 0.15 -- fraction of trackpad width before triggering
+local SWIPE_THRESHOLD = 0.04 -- fraction of trackpad width before triggering
 
 local Swipe = hs.loadSpoon("Swipe")
 

@@ -12,6 +12,7 @@
     "zed"
     "voiceink"
     "codex"
+    "hammerspoon"
   ];
 
   home-manager.users.noah = import ./home.nix;

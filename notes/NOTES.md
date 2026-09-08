@@ -59,6 +59,8 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
   `mcp.noahbres.com` not created yet. API tokens in 1Password: `cloudflare-token-creator` (can mint
   tokens) and `cloudflare-rtk-api-token` (scoped: Tunnel/Access/DNS/WAF on noahbres.com, expires
   2026-10-08). Bearer token + MCP secret: 1Password item `rtk-api`.
+- **Status 2026-09-08**: deployed (gen 46), FDA granted to `~/Applications/rtk-api.app`; Things read/write and
+  all iMessage read tools verified end-to-end through `api.noahbres.com`. iMessage send still off.
 - **TCC gotcha**: under launchd, first access to another app's container (Things group container,
   chat.db, AddressBook) pops macOS's "access data from other apps" prompt on rtk's screen and blocks
   that call until clicked. `things` is imported lazily and tool calls run in a threadpool so the

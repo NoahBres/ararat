@@ -50,6 +50,7 @@ in
   # Token is available in Cloudflare Zero Trust → Networks → Tunnels → <tunnel> → Configure → Install connector
   launchd.agents.cloudflared = {
     enable = true;
+    waitForNixStore = false; # show as "cloudflared" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
     config = {
       Label = "com.noahbres.cloudflared";
       ProgramArguments = [ "${cloudflaredStart}" ];
@@ -65,6 +66,7 @@ in
 
   launchd.agents.things-today-tracker = {
     enable = true;
+    waitForNixStore = false; # show as "things-today-tracker" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
     config = {
       Label = "com.noahbres.things-today-tracker";
       ProgramArguments = [
@@ -90,6 +92,7 @@ in
 
   launchd.agents.ararat = {
     enable = true;
+    waitForNixStore = false; # show as "ararat" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
     config = {
       Label = "com.noahbres.ararat";
       ProgramArguments = [ "${araratatStart}" ];
@@ -136,6 +139,7 @@ in
   #      Must be done via Screen Sharing on rtk (TCC/GUI step).
   launchd.agents.rtk-api = {
     enable = true;
+    waitForNixStore = false; # show as "rtk-api" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
     config = {
       Label = "com.noahbres.rtk-api";
       # Makes System Settings > General > Login Items list this as "rtk-api"

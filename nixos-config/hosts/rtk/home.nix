@@ -138,6 +138,10 @@ in
     enable = true;
     config = {
       Label = "com.noahbres.rtk-api";
+      # Makes System Settings > General > Login Items list this as "rtk-api"
+      # (the launcher app's bundle) instead of "sh" (home-manager wraps every
+      # agent in /bin/sh -c 'wait4path ... && exec ...').
+      AssociatedBundleIdentifiers = [ "com.noahbres.rtk-api" ];
       # Run via the rtk-api.app launcher so macOS attributes TCC permissions
       # (Full Disk Access, "access data from other apps", Automation) to a
       # named app instead of a generic python/uv binary. Build once on rtk:

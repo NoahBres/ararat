@@ -1,6 +1,6 @@
 # Plan: `rtk-api` — personal API + MCP server on the Mac mini (`rtk`)
 
-Status: Written 2026-09-07 (as `hometools`, renamed `rtk-api` 2026-09-08). **Phases 0–3 complete and verified 2026-09-08**, including Cloudflare Access and Full Disk Access via the `rtk-api.app` launcher (not in the original plan; see `notes/NOTES.md` → rtk-api). Remaining: Phase 4 / `mcp.noahbres.com`, iMessage send enablement. Current-state reference is `notes/NOTES.md`; this doc is the design rationale.
+Status: Written 2026-09-07 (as `hometools`, renamed `rtk-api` 2026-09-08). **Phases 0–3 complete and verified 2026-09-08**, including Cloudflare Access and Full Disk Access via the `rtk-api.app` launcher (not in the original plan; see `NOTES.md`). Remaining: Phase 4 / `mcp.noahbres.com`, iMessage send enablement. Current-state reference is `NOTES.md`; this doc is the design rationale.
 Audience: implementing agents (any model). Read the whole doc before starting a phase.
 Owner: Noah. Anything marked **[NOAH]** is a manual step only Noah can do (dashboard clicks, TCC prompts, secrets).
 
@@ -174,7 +174,7 @@ All work happens in `rtk-api/` in this repo. Develop on rnn, deploy by pushing +
      -H "CF-Access-Client-Id: $CF_ID" -H "CF-Access-Client-Secret: $CF_SECRET" \
      -H 'content-type: application/json' -d '{"view":"today"}'   # 200 + tasks
    ```
-7. **Docs**: add `rtk-api` to the "Available Capabilities" section of `CLAUDE.md` and a short section in `notes/NOTES.md` (hostnames, where secrets live, how to restart).
+7. **Docs**: add `rtk-api` to the "Available Capabilities" section of `CLAUDE.md` and a short section in `rtk-api/notes/NOTES.md` (hostnames, where secrets live, how to restart).
 
 Acceptance: REST works through Cloudflare with the service token; MCP endpoint at `https://mcp.noahbres.com/<secret>/mcp` responds to `initialize` (test with `npx @modelcontextprotocol/inspector` or `claude mcp add --transport http rtk-api https://mcp.noahbres.com/<secret>/mcp` then `claude mcp list`).
 
@@ -233,7 +233,7 @@ Two viable upgrades, both keep the capability URL as fallback:
 - **OAuth via `fastmcp`'s Google OAuth proxy provider** (`GoogleProvider`), with Claude.ai's redirect `https://claude.ai/api/mcp/auth_callback` allowed, plus a custom check that the authenticated email == `noahbres@gmail.com` (FastMCP has no built-in allowed-emails setting; add a small middleware/`verify_token` hook). Known reports of rough edges with Claude.ai + Google provider — read the fastmcp issues before committing.
 - **Cloudflare "MCP server portal" / Access for SaaS (OIDC)** in front of `mcp.noahbres.com` so Cloudflare does the OAuth and Claude.ai sees a standards-compliant AS. Check current Cloudflare docs; this was beta in 2025–2026.
 
-Not planned: exposing the ssh hostname to Access is a separate, existing hardening TODO in `notes/NOTES.md`.
+Not planned: exposing the ssh hostname to Access is a separate, existing hardening TODO in `../../notes/NOTES.md`.
 
 ---
 

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "telegram": {
-      "command": "sh",
-      "args": ["-c", "bun \"$HOME/Developer/ararat/telegram-plugin/server.ts\""]
-    }
-  }
-}

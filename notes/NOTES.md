@@ -27,38 +27,38 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname %h" noah@ssh-rtk.noahbres
 
 Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separate Cloudflare Access login/service-token step needed since no Access policy is enforced.
 
-## hometools (api.noahbres.com / mcp.noahbres.com)
+## rtk-api (api.noahbres.com / mcp.noahbres.com)
 
-`hometools` is a private, authenticated HTTP surface running on `rtk` that exposes personal
+`rtk-api` is a private, authenticated HTTP surface running on `rtk` that exposes personal
 "tools" (Things 3, iMessage, etc.) to AI agents over REST and MCP. Full design: see
-`notes/plans/hometools-api.md`. Usage/dev docs: `hometools/README.md`.
+`notes/plans/rtk-api.md`. Usage/dev docs: `rtk-api/README.md`.
 
 - **Hostnames**: `api.noahbres.com` (REST, Cloudflare Access service-token auth) and
   `mcp.noahbres.com` (MCP, capability-URL auth: `https://mcp.noahbres.com/<secret>/mcp`).
   Both route through the existing `rtk` Cloudflare Tunnel to one local process.
 - **Port**: `127.0.0.1:8787` on `rtk` only — never bound publicly; all ingress is via the tunnel.
-- **Secrets**: `~/.config/hometools/env` on `rtk` (`chmod 600`, gitignored, never committed).
-  Holds `HOMETOOLS_BEARER_TOKEN`, `HOMETOOLS_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`,
+- **Secrets**: `~/.config/rtk-api/env` on `rtk` (`chmod 600`, gitignored, never committed).
+  Holds `RTK_API_BEARER_TOKEN`, `RTK_API_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`,
   `CF_ACCESS_AUD`, `THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`.
-  Also backed up in 1Password (item `hometools`).
-- **launchd**: `com.noahbres.hometools`, defined in `nixos-config/hosts/rtk/home.nix`
+  Also backed up in 1Password (item `rtk-api`).
+- **launchd**: `com.noahbres.rtk-api`, defined in `nixos-config/hosts/rtk/home.nix`
   (modelled on `things-today-tracker` / `ararat`). Runs
-  `uv run --frozen hometools serve --host 127.0.0.1 --port 8787` from
-  `~/Developer/ararat/hometools`, sourcing the secrets file first. Logs: `/tmp/hometools.log`,
-  `/tmp/hometools-error.log`.
-- **Aliases** (on `rtk`): `restart-hometools`, `kill-hometools`, `hometools-log`.
-- **Deploy**: `hometools/deploy.sh` — pulls, `uv sync --frozen`, kicks the launchd agent, polls
-  `/health`. Run directly on `rtk`, or `hometools/deploy.sh --remote` from `rnn` (SSHes in via
+  `uv run --frozen rtk-api serve --host 127.0.0.1 --port 8787` from
+  `~/Developer/ararat/rtk-api`, sourcing the secrets file first. Logs: `/tmp/rtk-api.log`,
+  `/tmp/rtk-api-error.log`.
+- **Aliases** (on `rtk`): `restart-rtk-api`, `kill-rtk-api`, `rtk-api-log`.
+- **Deploy**: `rtk-api/deploy.sh` — pulls, `uv sync --frozen`, kicks the launchd agent, polls
+  `/health`. Run directly on `rtk`, or `rtk-api/deploy.sh --remote` from `rnn` (SSHes in via
   `rtk-cloudflare`). Re-apply the nix config (`just deploy-rtk` from `rnn`, see "Deploying nix config to `rtk`"
   below) only when `home.nix` itself changes.
 - **Cloudflare state (as of 2026-09-08)**: tunnel `ararat` (id `a1428f1d-04a1-496f-a8f0-18bc7ee54152`,
   account `b912898d014811a465b4b3bf29ba9c0b`) has ingress `api.noahbres.com -> http://localhost:8787`
   and a proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`, both created via API. **Cloudflare
   Access is NOT enabled on the account yet** (dashboard-only "Enable Access" step), so `api.` is
-  protected by the hometools bearer token alone (TLS + 256-bit random token, constant-time compare).
+  protected by the rtk-api bearer token alone (TLS + 256-bit random token, constant-time compare).
   `mcp.noahbres.com` not created yet. API tokens in 1Password: `cloudflare-token-creator` (can mint
-  tokens) and `cloudflare-hometools-token` (scoped: Tunnel/Access/DNS/WAF on noahbres.com, expires
-  2026-10-08). Bearer token + MCP secret: 1Password item `hometools`.
+  tokens) and `cloudflare-rtk-api-token` (scoped: Tunnel/Access/DNS/WAF on noahbres.com, expires
+  2026-10-08). Bearer token + MCP secret: 1Password item `rtk-api`.
 - **TCC gotcha**: under launchd, first access to another app's container (Things group container,
   chat.db, AddressBook) pops macOS's "access data from other apps" prompt on rtk's screen and blocks
   that call until clicked. `things` is imported lazily and tool calls run in a threadpool so the
@@ -71,7 +71,7 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
      team domain.
   3. Do **not** put Access on `mcp.noahbres.com` (Claude.ai can't send custom headers) — add a
      rate-limit rule there instead.
-  4. Create `~/.config/hometools/env` on `rtk` with the variables listed above.
+  4. Create `~/.config/rtk-api/env` on `rtk` with the variables listed above.
   5. Grant Full Disk Access to the uv-managed Python (needed for iMessage only) via Screen
      Sharing on `rtk`.
   6. If iMessage write is ever enabled, approve the Automation/TCC prompt for Messages.app via
@@ -88,7 +88,7 @@ Why deploy-rs and not `darwin-rebuild --target-host`: nix-darwin has no upstream
 support (PR nix-darwin/nix-darwin#1631 still open). Why not passwordless sudo: Noah doesn't want
 it. deploy-rs is configured with `interactiveSudo = true`, so it prompts for the rtk sudo password
 and never needs a NOPASSWD rule. Consequence: **nix deploys to rtk are human-only** — agents can't
-run them non-interactively. Code deploys for hometools don't need root and stay agent-runnable.
+run them non-interactively. Code deploys for rtk-api don't need root and stay agent-runnable.
 
 **How it works:** builds the rtk closure locally on `rnn` (`remoteBuild = false`, so the mini
 never compiles anything), `nix copy`s it over the `rtk-cloudflare` SSH alias, activates via
@@ -113,8 +113,8 @@ Nix's "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys 
 
 - *Change something in `hosts/rtk/home.nix` or shared config* → `just deploy-rtk-dry`, then
   `just deploy-rtk`. Commit + push afterwards so rtk's own checkout (`~/Developer/ararat`) stays
-  in sync for the hometools/ararat `git pull`s.
-- *Change only hometools Python code* → `hometools/deploy.sh --remote`. No nix involved.
+  in sync for the rtk-api/ararat `git pull`s.
+- *Change only rtk-api Python code* → `rtk-api/deploy.sh --remote`. No nix involved.
 - *Change both* → deploy-rs first (it installs the launchd plist), then `deploy.sh --remote`.
 - *Bump inputs* → `just update`, `just switch` on rnn, then `just deploy-rtk`. Remember the
   `cloudflared` daemon on rtk is nix-managed, so this is how it gets upgraded.

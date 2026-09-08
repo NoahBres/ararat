@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Canonical copy of this logic now lives in
-hometools/src/hometools/lib/imessage_db.py -- fix bugs there, this script is
+rtk-api/src/rtk-api/lib/imessage_db.py -- fix bugs there, this script is
 just a standalone CLI wrapper kept for casual ad-hoc use.
 
 Query iMessages from ~/Library/Messages/chat.db.

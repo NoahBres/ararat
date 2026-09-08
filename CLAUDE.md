@@ -198,13 +198,13 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 ### Local Files
 
 **`notes/`**
-- `notes/plans/hometools-api.md` — implementation plan for the `hometools` personal API/MCP server on rtk (api.noahbres.com / mcp.noahbres.com); read before working on that project
+- `notes/plans/rtk-api.md` — implementation plan for the `rtk-api` personal API/MCP server on rtk (api.noahbres.com / mcp.noahbres.com); read before working on that project
 - `notes/SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
 - `notes/NOTES.md` — project implementation notes (Telegram plugin setup, etc.)
 - `notes/llm-projects.md` — curated list of interesting LLM-related projects
 
-**`hometools/`**
-- Private authenticated HTTP/MCP server for personal tools (Things 3, iMessage), deployed on `rtk` as `api.noahbres.com` / `mcp.noahbres.com`. See `notes/plans/hometools-api.md` (plan) and `notes/NOTES.md` (hometools section) for details; `hometools/README.md` for dev usage.
+**`rtk-api/`**
+- Private authenticated HTTP/MCP server for personal tools (Things 3, iMessage), deployed on `rtk` as `api.noahbres.com` / `mcp.noahbres.com`. See `notes/plans/rtk-api.md` (plan) and `notes/NOTES.md` (rtk-api section) for details; `rtk-api/README.md` for dev usage.
 
 **`tools/`**
 - `tools/send-cmd.sh` — sends a slash command to the Ararat remote control session (e.g. `/clear`, `/model haiku`)
@@ -213,7 +213,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - `tools/things-today-tracker.md` — documentation for the things-today-tracker script (launchd schedule, usage, data store location)
 - `tools/imessage-query.py` — queries chat.db for messages by phone/email identifier; used by the imessage-lookup skill
 - `tools/contacts-search.py` — fuzzy-searches AddressBook contacts by name; used by the contacts-search skill
-- `hometools/deploy.sh` — deploys hometools on `rtk` (git pull, `uv sync --frozen`, restart launchd agent, poll `/health`); `--remote` runs it over SSH from `rnn`
+- `rtk-api/deploy.sh` — deploys rtk-api on `rtk` (git pull, `uv sync --frozen`, restart launchd agent, poll `/health`); `--remote` runs it over SSH from `rnn`
 
 **`private-data/`** (gitignored)
 

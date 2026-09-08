@@ -14,17 +14,17 @@ let
     done
     exit 1
   '';
-  hometoolsStart = pkgs.writeShellScript "hometools-start" ''
+  rtkApiStart = pkgs.writeShellScript "rtk-api-start" ''
     set -euo pipefail
-    cd "${config.home.homeDirectory}/Developer/ararat/hometools"
-    if [ ! -f "${config.home.homeDirectory}/.config/hometools/env" ]; then
-      echo "hometools: missing ${config.home.homeDirectory}/.config/hometools/env -- see setup comment in home.nix" >&2
+    cd "${config.home.homeDirectory}/Developer/ararat/rtk-api"
+    if [ ! -f "${config.home.homeDirectory}/.config/rtk-api/env" ]; then
+      echo "rtk-api: missing ${config.home.homeDirectory}/.config/rtk-api/env -- see setup comment in home.nix" >&2
       exit 1
     fi
     set -a
-    source "${config.home.homeDirectory}/.config/hometools/env"
+    source "${config.home.homeDirectory}/.config/rtk-api/env"
     set +a
-    exec ${pkgs.uv}/bin/uv run --frozen hometools serve --host 127.0.0.1 --port 8787
+    exec ${pkgs.uv}/bin/uv run --frozen rtk-api serve --host 127.0.0.1 --port 8787
   '';
 in
 {
@@ -38,9 +38,9 @@ in
     "attach-ararat" = "tmux attach-session -t ararat";
     "restart-ararat" = "launchctl kickstart -k gui/$UID/com.noahbres.ararat";
     "kill-ararat" = "launchctl kill SIGTERM gui/$UID/com.noahbres.ararat";
-    "restart-hometools" = "launchctl kickstart -k gui/$UID/com.noahbres.hometools";
-    "kill-hometools" = "launchctl kill SIGTERM gui/$UID/com.noahbres.hometools";
-    "hometools-log" = "tail -f /tmp/hometools.log /tmp/hometools-error.log";
+    "restart-rtk-api" = "launchctl kickstart -k gui/$UID/com.noahbres.rtk-api";
+    "kill-rtk-api" = "launchctl kill SIGTERM gui/$UID/com.noahbres.rtk-api";
+    "rtk-api-log" = "tail -f /tmp/rtk-api.log /tmp/rtk-api-error.log";
   };
 
   # cloudflared tunnel token must be manually deployed to the machine before activating:
@@ -112,34 +112,41 @@ in
     };
   };
 
-  # hometools -- personal API + MCP server (api.noahbres.com / mcp.noahbres.com).
-  # See notes/plans/hometools-api.md for the full design.
+  # rtk-api -- personal API + MCP server (api.noahbres.com / mcp.noahbres.com).
+  # See notes/plans/rtk-api.md for the full design.
   #
   # One-time setup on rtk before this agent will start successfully:
   #   1. `uv python install 3.12` (pins the interpreter path the FDA grant in
   #      plan §6.1 depends on -- don't bump the patch version casually).
-  #   2. Create ~/.config/hometools/env (chmod 600) with:
-  #        HOMETOOLS_BEARER_TOKEN=<openssl rand -hex 32>
-  #        HOMETOOLS_MCP_SECRET=<openssl rand -hex 24>   # url-safe, no slashes
+  #   2. Create ~/.config/rtk-api/env (chmod 600) with:
+  #        RTK_API_BEARER_TOKEN=<openssl rand -hex 32>
+  #        RTK_API_MCP_SECRET=<openssl rand -hex 24>   # url-safe, no slashes
   #        CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
   #        CF_ACCESS_AUD=<aud tag from the Cloudflare Access app for api.noahbres.com>
   #        THINGS_AUTH_TOKEN=<same value as in ~/Developer/ararat/.env>
   #        IMESSAGE_WRITE_ENABLED=false
   #        IMESSAGE_WRITE_ALLOWLIST=            # comma-separated phone/email identifiers
-  #      Also save the bearer token and MCP secret to 1Password (item `hometools`).
-  #   3. Full Disk Access (only needed for iMessage tools, not Things): System
-  #      Settings -> Privacy & Security -> Full Disk Access -> `+` -> press
-  #      Cmd+Shift+G and paste the path from `uv python find 3.12` inside
-  #      `hometools/` (something like
-  #      ~/.local/share/uv/python/cpython-3.12.x-macos-aarch64-none/bin/python3.12)
-  #      -> enable. Then `restart-hometools`. Must be done via Screen Sharing
-  #      on rtk (this is a TCC/GUI step, not something an agent can do).
-  launchd.agents.hometools = {
+  #      Also save the bearer token and MCP secret to 1Password (item `rtk-api`).
+  #   3. Build the launcher app: `~/Developer/ararat/rtk-api/launcher/build.sh`
+  #      (creates ~/Applications/rtk-api.app; do this BEFORE deploying this
+  #      agent or launchd will fail to start it).
+  #   4. Full Disk Access (covers Things group container, chat.db, AddressBook):
+  #      System Settings -> Privacy & Security -> Full Disk Access -> `+` ->
+  #      pick ~/Applications/rtk-api.app -> enable. Then `restart-rtk-api`.
+  #      Must be done via Screen Sharing on rtk (TCC/GUI step).
+  launchd.agents.rtk-api = {
     enable = true;
     config = {
-      Label = "com.noahbres.hometools";
-      ProgramArguments = [ "${hometoolsStart}" ];
-      WorkingDirectory = "${config.home.homeDirectory}/Developer/ararat/hometools";
+      Label = "com.noahbres.rtk-api";
+      # Run via the rtk-api.app launcher so macOS attributes TCC permissions
+      # (Full Disk Access, "access data from other apps", Automation) to a
+      # named app instead of a generic python/uv binary. Build once on rtk:
+      #   ~/Developer/ararat/rtk-api/launcher/build.sh
+      ProgramArguments = [
+        "${config.home.homeDirectory}/Applications/rtk-api.app/Contents/MacOS/rtk-api"
+        "${rtkApiStart}"
+      ];
+      WorkingDirectory = "${config.home.homeDirectory}/Developer/ararat/rtk-api";
       EnvironmentVariables = {
         PATH = "/opt/homebrew/bin:/etc/profiles/per-user/noah/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
         LANG = "en_US.UTF-8";
@@ -150,8 +157,8 @@ in
       };
       ThrottleInterval = 5;
       RunAtLoad = true;
-      StandardOutPath = "/tmp/hometools.log";
-      StandardErrorPath = "/tmp/hometools-error.log";
+      StandardOutPath = "/tmp/rtk-api.log";
+      StandardErrorPath = "/tmp/rtk-api-error.log";
     };
   };
 }

@@ -102,6 +102,7 @@ in
     packages = with pkgs; [
       _1password-cli # 1Password CLI (op)
       gh # GitHub CLI
+      cloudflared # cloudflare tunnel client (Access to rtk over ssh-rtk.noahbres.com)
 
       just
       tree

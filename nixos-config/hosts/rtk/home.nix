@@ -19,7 +19,6 @@ in
   imports = [ ../common/darwin/home.nix ];
 
   home.packages = with pkgs; [
-    cloudflared
     ffmpeg
   ];
 
@@ -63,7 +62,12 @@ in
         LANG = "en_US.UTF-8";
         LC_ALL = "en_US.UTF-8";
       };
-      StartCalendarInterval = [{ Hour = 9; Minute = 7; }];
+      StartCalendarInterval = [
+        {
+          Hour = 9;
+          Minute = 7;
+        }
+      ];
       StandardOutPath = "/tmp/things-today-tracker.log";
       StandardErrorPath = "/tmp/things-today-tracker-error.log";
     };

@@ -15,6 +15,8 @@ Docs: https://culturedcode.com/things/support/articles/2803573/
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 import subprocess
 import time
 from datetime import datetime, timedelta
@@ -111,14 +113,84 @@ def _compact(task: dict[str, Any], resolver: _TitleResolver) -> dict[str, Any]:
 def list_tasks(view: View, limit: int = 200) -> list[dict]:
     """List Things to-dos in a given view: inbox, today, upcoming, anytime,
     someday, or logbook. Returns compact dicts (uuid, title, status, notes,
-    dates, project/area titles, tags).
+    dates, project/area titles, tags) in the order the Things app shows
+    them (for `today` that means newest reference date first, then
+    ascending Today index -- see `_sort_today_like_app`).
     """
     func_name = _VIEW_FUNC_NAMES.get(view)
     if func_name is None:
         raise ValueError(f"unknown view {view!r}; expected one of {sorted(_VIEW_FUNC_NAMES)}")
     tasks = getattr(things_lib, func_name)()
+    if view == "today":
+        tasks = _sort_today_like_app(tasks)
     resolver = _TitleResolver()
     return [_compact(t, resolver) for t in tasks[:limit]]
+
+
+def _today_index_refs(uuids: list[str]) -> dict[str, int | None]:
+    """Map task uuid -> `todayIndexReferenceDate` straight from the Things
+    sqlite DB (read-only). The `things` library doesn't select that column,
+    so this is a tiny direct query reusing the library's own DB path
+    resolution (`THINGSDB` env or the default group-container path).
+
+    Returns `{}` if the DB can't be read (not installed, no permission) so
+    callers can fall back to the library's order. Chunked to stay under
+    SQLite's variable-number limit.
+    """
+    try:
+        from things import database as things_db  # noqa: PLC0415 - lazy (see _LazyThings)
+
+        filepath = os.environ.get(things_db.ENVIRONMENT_VARIABLE_WITH_FILEPATH) or (
+            things_db.DEFAULT_FILEPATH
+        )
+        refs: dict[str, int | None] = {}
+        connection = sqlite3.connect(f"file:{filepath}?mode=ro", uri=True)
+        try:
+            for i in range(0, len(uuids), 400):
+                chunk = uuids[i : i + 400]
+                placeholders = ",".join("?" * len(chunk))
+                rows = connection.execute(
+                    "SELECT uuid, todayIndexReferenceDate FROM TMTask "
+                    f"WHERE uuid IN ({placeholders})",
+                    chunk,
+                )
+                for uuid, ref in rows:
+                    refs[uuid] = ref
+        finally:
+            connection.close()
+        return refs
+    except Exception:
+        return {}
+
+
+_MISSING_INDEX = 2**63
+
+
+def _sort_today_like_app(tasks: list[dict]) -> list[dict]:
+    """Re-sort `things.today()` output into the order the Things app shows.
+
+    The library sorts Today by raw `todayIndex` ascending, but `todayIndex`
+    values are only comparable within the same `todayIndexReferenceDate` --
+    the app groups by reference date, newest first, then orders by
+    `todayIndex` ascending within each group (verified against the app's
+    manual Today order, which raw-`todayIndex` order did not reproduce).
+    """
+    uuids = [t["uuid"] for t in tasks if t.get("uuid")]
+    refs = _today_index_refs(uuids)
+    if not refs:
+        return tasks
+
+    def key(task: dict) -> tuple:
+        ref = refs.get(task.get("uuid"))
+        index = task.get("today_index")
+        return (
+            ref is None,  # tasks with no reference date go last
+            -(ref or 0),  # newest reference date first
+            _MISSING_INDEX if index is None else index,
+            task.get("start_date") or "",
+        )
+
+    return sorted(tasks, key=key)
 
 
 @tool("things.search")

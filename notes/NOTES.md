@@ -1,14 +1,19 @@
 # Notes
 
-## Telegram Plugin
-- Implemented custom Telegram plugin based on https://github.com/anthropics/claude-code/issues/42037
-- Working correctly in current setup
-- Using local patched version instead of node_modules version (commit: `573d4ad`)
+## Retired: the Ararat Telegram assistant
+
+The Telegram bot, its patched MCP plugin (`telegram-plugin/`), the `claude-telegram.sh`
+`--remote-control` shim, and the `com.noahbres.ararat` launchd agent on `rtk` were removed
+in Sept 2026 — the bot wasn't used enough to justify running it. The trackers and
+`private-data/` it fed are unaffected. Everything removed is recoverable from git history.
+
+Note the rtk-api approval bot is a *separate* Telegram bot with its own token and is still
+live — see `rtk-api/notes/NOTES.md`.
 
 ## Hosts
 
 - **`rnn`** — local machine (this laptop/desktop you're usually working on directly).
-- **`rtk`** — a Mac mini physically hosted at home. It's the "remote Mac" — runs headless and is reached remotely over the Cloudflare tunnel below (not sitting on the same LAN as `rnn` day-to-day). This is also where the `ararat` Telegram assistant session actually runs (see `launchd.agents.ararat` in `nixos-config/hosts/rtk/home.nix`).
+- **`rtk`** — a Mac mini physically hosted at home. It's the "remote Mac" — runs headless and is reached remotely over the Cloudflare tunnel below (not sitting on the same LAN as `rnn` day-to-day).
 
 ## SSH + Cloudflare Tunnel access to `rtk`
 
@@ -29,178 +34,16 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
 
 ## rtk-api (api.noahbres.com)
 
-`rtk-api` is a private, authenticated HTTP API running on `rtk` (the home Mac mini) that exposes
-personal "tools" — Things 3 and iMessage today — to AI agents and scripts. Built 2026-09-08.
-Design doc: `notes/plans/rtk-api.md`. Dev/usage docs: `rtk-api/README.md`. Code: `rtk-api/`.
+A private, authenticated HTTP/MCP server on `rtk` exposing personal tools (Things 3, iMessage)
+to AI agents and scripts. **Its notes live with the code**, not here:
 
-### Architecture in one paragraph
+- `rtk-api/notes/NOTES.md` — current state: architecture, auth, credentials, Cloudflare objects,
+  gotchas, what's left.
+- `rtk-api/notes/plan.md` — original design doc and rollout phases.
+- `rtk-api/README.md` — dev/usage docs.
 
-One Python 3.12 process (FastAPI + fastmcp, managed by `uv`) listens on `127.0.0.1:8787` on rtk.
-A tool is a plain function registered with `@tool("things.list")` in `rtk-api/src/rtk_api/tools/`;
-the registry turns it into both a REST route (`POST /v1/things/list`, JSON kwargs in, `{"ok",
-"result"|"error"}` out) and an MCP tool. New tool modules dropped into `tools/` are auto-discovered.
-Write tools are flagged `write=True` and append to `~/.local/state/rtk-api/audit.log`. Tool calls
-run in a threadpool so one blocked call never freezes `/health`. Ingress is the existing
-Cloudflare Tunnel; nothing is bound publicly.
-
-### Calling it
-
-```sh
-curl https://api.noahbres.com/v1/things/list \
-  -H "CF-Access-Client-Id: $ID" -H "CF-Access-Client-Secret: $SECRET" \
-  -H "content-type: application/json" -d '{"view":"today"}'
-curl -H ... https://api.noahbres.com/v1/tools        # registry with JSON schemas
-curl https://api.noahbres.com/health                  # unauthenticated (still needs Access headers at the edge)
-```
-
-Tools (20): `system.{ping,version,echo}`; `things.{list,search,get,projects,areas,tasks_in}` (read),
-`things.{add,update,complete,add_project,batch}` (write, via `things:///` URL scheme; there is no
-delete in the scheme); `imessage.{chats,recent,with_contact,search,unread}` (read, chat.db +
-Contacts name resolution), `imessage.send` (write, **off** unless `IMESSAGE_WRITE_ENABLED=true`
-AND recipient in `IMESSAGE_WRITE_ALLOWLIST`; first real send will pop an Automation prompt for
-Messages.app on rtk's screen).
-
-### Auth (three layers)
-
-1. **Cloudflare Access** at the edge (team `bold-poetry-9de0`, Zero Trust Free). Access app
-   `rtk-api` on `api.noahbres.com`, one policy: Service Auth for service token `rtk-api` (expires
-   2027-09-08). Anything without valid `CF-Access-Client-Id`/`-Secret` headers gets 403 before
-   reaching rtk. Consequence: clients that can't set custom headers (Claude.ai's connector UI)
-   can't use `api.`; that's what the future `mcp.noahbres.com` capability-URL design is for.
-2. **The server authenticates** into a *principal*: a named client token in `X-Rtk-Client-Token`
-   or `Authorization: Bearer` matching `RTK_API_CLIENTS` (scoped), else the `Cf-Access-Jwt-Assertion`
-   JWT verified against the team's JWKS with the app's AUD (principal `owner`, unscoped), else
-   `Authorization: Bearer $RTK_API_BEARER_TOKEN` (`owner`, unscoped, only reachable from localhost
-   now), else the path starts with `/$RTK_API_MCP_SECRET/` (principal `mcp`, unscoped — checked
-   first of all). Failed auth → 401. The client token is deliberately checked **before** the CF JWT:
-   an external client presents both (Access headers to pass the edge, client token for identity),
-   and the scoped identity must win.
-3. **The server authorizes** the principal's fnmatch allowlist against the tool name. Denied → 403
-   (not 401 — the caller *is* authenticated). `GET /v1/tools` is filtered to the grant, and an
-   unknown tool outside the grant returns 403 rather than 404, so a scoped client can't enumerate
-   the registry.
-
-**Why the client token and not the Access JWT's `common_name` claim.** Service-token JWTs are
-believed to carry the client id in `common_name`, which would let the server distinguish tokens
-without a second credential — but the only way to confirm the claim's shape is to patch `auth.py`
-on a live rtk (the JWT exists only in flight; nothing echoes headers). Not worth the risk when a
-client token we control works regardless. Two header spellings are accepted because Cloudflare
-Access has a history of being fussy about forwarding `Authorization` to the origin;
-`X-Rtk-Client-Token` passes through cleanly and is preferred. Which one actually fires is visible
-as `principal` in the access log.
-
-**Scoped clients.** `RTK_API_CLIENTS` is a JSON map, name → `{token, allow, require_approval}`,
-with fnmatch patterns over tool names. Malformed JSON fails closed (no clients, error logged)
-rather than crashing the server, so a bad edit can't lock the owner out. Full docs:
-`rtk-api/README.md`.
-
-#### Planned: `instinct`
-
-`instinct` is Noah's iMessage agent, running **in the cloud** (not on rtk), so it must come through
-Cloudflare Access. Intended grant: all of `things.*` (read + write, ungated) and `imessage.*` reads,
-with `imessage.send` gated behind approval. It needs **its own Access service token** — not for
-identity (the client token does that) but for revocation: a separate token can be cut at the edge
-without invalidating Noah's own access, and it keeps the Cloudflare audit log legible.
-
-Not yet created: instinct's service token, its client token, the `RTK_API_CLIENTS` entry on rtk.
-
-#### Planned: approval queue (`require_approval`) — designed, not built
-
-`require_approval` is honored in code today only as a refusal: it is checked *before* `allow` and
-overrides it, so a listed tool returns 403 instead of running unattended. The intended mechanism:
-
-- `imessage.send` → server persists a pending approval and returns `202 {"ok": false, "status":
-  "pending", "approval_id": ...}`; the caller polls. **Not** a blocking wait — the threadpool exists
-  precisely so no call can freeze `/health`, and a cloud agent's HTTP client would time out before
-  Noah reached his phone anyway.
-- Notification goes out over a **dedicated second Telegram bot**, polled from inside the rtk-api
-  process. Telegram allows exactly one `getUpdates` consumer per token (see
-  `telegram-plugin/server.ts:79`, and the 409 handling at :1101), so rtk-api cannot receive button
-  callbacks on ararat's bot — ararat's poller owns them. It could *send* through ararat's bot, but
-  ararat's poller only runs while that Claude session runs, and restarting ararat is routine; a bot
-  polled by rtk-api is up exactly when rtk-api is up. Rejected alternative: patching the plugin's
-  `callback_query` handler to forward an `rtk:` prefix to localhost — same availability coupling,
-  plus it forks a vendored upstream.
-- The inline-keyboard Allow/Deny UX already exists in the plugin (`server.ts:436-452`, callback at
-  :736) and is worth copying — **including** its sender check at :746. Authorize on `ctx.from.id`,
-  not `chat_id`: Telegram bots are discoverable by username, so an unauthenticated Allow button is
-  a human gate any stranger can press.
-- Persist the pending queue to `~/.local/state/rtk-api/` (where `audit.log` already lives) and
-  reconcile on boot. rtk-api is a daemon that gets redeployed; an in-memory map would silently drop
-  every in-flight approval on restart.
-- Keep `IMESSAGE_WRITE_ALLOWLIST` enforced *underneath* approvals. Approval decides "this message";
-  the allowlist decides "this recipient is ever reachable at all". Both, not either.
-- Resolve the recipient through `contacts.lookup_name` when composing the prompt. Approving
-  "send to +1555…" tells you nothing; "send to Kirill" tells you everything.
-- **Do the Messages.app Automation grant first, as a separate step over Screen Sharing.** The first
-  real send pops a TCC prompt on rtk's screen, and TCC prompts block silently under launchd. Wiring
-  approvals and flipping `IMESSAGE_WRITE_ENABLED` in one change stacks two invisible hangs.
-
-### Credentials index (all in 1Password, Private vault)
-
-| Item | What |
-|---|---|
-| `rtk-api` | bearer token + MCP secret (mirror of `~/.config/rtk-api/env` on rtk) |
-| `rtk-api cloudflare access service token` | client id + secret for the Access headers |
-| `cloudflare-rtk-api-token` | scoped Cloudflare API token (Tunnel/Access/DNS/WAF on noahbres.com), expires 2026-10-08 |
-| `cloudflare-token-creator` | Cloudflare token that can mint other tokens |
-| `Things` | Things auth token also lives in `~/Developer/ararat/.env` on rtk |
-
-Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git):
-`RTK_API_BEARER_TOKEN`, `RTK_API_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`,
-`THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`, and optionally
-`RTK_API_CLIENTS`.
-
-### Cloudflare objects (account `b912898d014811a465b4b3bf29ba9c0b`, zone `1a485d0b081c74cfe34537c498114b55`)
-
-- Tunnel `ararat` (`a1428f1d-04a1-496f-a8f0-18bc7ee54152`), remote-managed by token in
-  `/etc/cloudflared/tunnel-token` on rtk. Ingress: `ssh-rtk.noahbres.com -> ssh://localhost:22`,
-  `api.noahbres.com -> http://localhost:8787`. Public hostnames live in the Zero Trust dashboard /
-  API, not in a local `config.yml`.
-- DNS: proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`.
-- Access app `rtk-api` + service token `rtk-api` (above). `ssh-rtk.noahbres.com` still has **no**
-  Access policy (SSH keys are the only guard there).
-- Not created: `mcp.noahbres.com`, WAF rate-limit rules.
-
-### Running on rtk
-
-- launchd agent `com.noahbres.rtk-api` (nix: `nixos-config/hosts/rtk/home.nix`). It runs
-  `~/Applications/rtk-api.app/Contents/MacOS/rtk-api <start-script>`; the start script sources the
-  env file and execs `uv run --frozen rtk-api serve`. Logs `/tmp/rtk-api.log`,
-  `/tmp/rtk-api-error.log`. Aliases on rtk: `restart-rtk-api`, `kill-rtk-api`, `rtk-api-log`.
-- **`rtk-api.app` is a tiny C launcher** (`rtk-api/launcher/`, built once on rtk with
-  `launcher/build.sh`, ad-hoc signed, bundle id `com.noahbres.rtk-api`). It spawns the real command
-  as a child and forwards signals. Purpose: macOS attributes TCC permissions to a launchd job's
-  main executable, so this makes the prompts and the Full Disk Access list say "rtk-api" instead
-  of "python3.12"/"uvx". **Full Disk Access is granted to it** (covers Things' group container,
-  chat.db, AddressBook). Rebuilding the launcher (`--force`) changes its signature and requires
-  re-granting.
-- Python is uv-managed CPython 3.12.13 (`~/.local/share/uv/python/...`), pinned in
-  `rtk-api/.python-version`. Not nix-managed on purpose (nix store paths churn on every rebuild).
-- **Code deploy** (no root, agent-runnable): `rtk-api/deploy.sh --remote` from rnn — pulls,
-  `uv sync --frozen`, kickstarts the agent, polls `/health`. Nix deploy only when `home.nix` changes.
-
-### Gotchas learned
-
-- **TCC prompts block silently under launchd.** First access to another app's container pops
-  "rtk-api would like to access data from other apps" on rtk's screen and the syscall blocks until
-  clicked. `things` is imported lazily and tools run in a threadpool so the server still boots;
-  the affected call just hangs. Approve via Screen Sharing (or FDA covers it).
-- SSH sessions have Full Disk Access implicitly, so "it works over ssh" proves nothing about
-  launchd.
-- `things.search` only returns incomplete items by default.
-- The service-token JWT check needs outbound HTTPS from rtk to
-  `bold-poetry-9de0.cloudflareaccess.com/cdn-cgi/access/certs` (cached after first fetch).
-
-### Not done / future
-
-- `mcp.noahbres.com` for Claude.ai (design in plan §2/§5/§7): same process, capability URL, no
-  Access, plus a Cloudflare rate-limit rule. Code path exists behind `RTK_API_MCP_SECRET`; untested
-  against Claude.ai.
-- iMessage send enablement (flip the two env vars, approve the Automation prompt).
-- Access policy on `ssh-rtk.noahbres.com`.
-- `things-today-tracker` still runs as bare `/usr/bin/python3` and triggers its own "uvx" TCC
-  prompts; could be routed through the same launcher.
+Host-level context that rtk-api depends on stays here: the Cloudflare Tunnel section above, and
+the deploy-rs section below.
 
 ## Deploying nix config to `rtk` (deploy-rs)
 

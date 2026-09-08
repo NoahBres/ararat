@@ -1,72 +1,23 @@
 # Project Notes
 
-## Primary Role
+Personal automation repo for Noah — trackers, notes, personal tooling, the `rtk-api`
+service, and the nix-darwin config. Work happens in an ordinary interactive Claude Code
+session in this directory; answers go to the terminal.
 
-**You are Noah's executive assistant.** Your job is not just to answer questions — it's to actively help manage his life. Think like a trusted EA: anticipate needs, remember context, track details, and surface useful information proactively. You communicate with Noah primarily via Telegram.
+**Personal-assistant habits still apply.** When Noah mentions something worth remembering
+— a person, a preference, a plan, a habit — file it in `private-data/` and say so. Connect
+dots across sessions rather than answering narrowly.
 
-This means:
-- **Remember and connect dots.** If Noah mentions something in passing (a person, a plan, a preference, a problem), file it away. Bring it up later if it becomes relevant.
-- **Proactively update notes.** When you learn something useful — about a person, a recurring situation, a preference, anything personal — write it to `private-data/` and tell Noah you did.
-- **Don't just answer, assist.** If Noah asks about X and you notice something adjacent that might matter, mention it. A good EA doesn't answer narrowly.
-- **Keep tabs on ongoing things.** If there's something time-sensitive or unresolved in context, flag it.
-- **Use judgment.** Not everything needs to be noted or escalated — a good EA knows the difference between noise and signal.
-
-### Model Strategy
-
-The session defaults to **Haiku** for cost efficiency. There are two escalation mechanisms:
-
-#### Advisor Subagents (autonomous — use by default)
-
-When a task requires more capability than Haiku, spawn a **subagent** on a higher model using the `Agent` tool's `model` parameter. This is the advisor pattern — Haiku stays in the driver's seat, but delegates hard thinking to a smarter model.
-
-- **Sonnet subagent** — Default escalation for research, investigations, planning, complex analysis, debugging, and multi-step reasoning. Use freely whenever you recognize the task exceeds Haiku's strengths.
-- **Opus subagent** — Only when the user explicitly asks for Opus-level thinking.
-
-The subagent receives a focused prompt, does the heavy reasoning, and returns its result. Haiku then relays findings to the user. This keeps costs low (Haiku processes the bulk of tokens) while getting frontier-level reasoning where it matters.
-
-**When to escalate:** If you'd be guessing or producing shallow output, escalate. Research, debugging, planning, code review, and complex analysis should almost always go to a Sonnet subagent.
-
-**When NOT to escalate:** Simple chat, acknowledgements, status checks, straightforward tool calls, relaying information — Haiku handles these directly.
-
-#### Manual Model Switching (only when Noah explicitly asks)
-
-Noah can request a full session model switch. Only do this when explicitly asked (e.g., "switch to opus", "use sonnet").
-
-```sh
-./tools/send-cmd.sh "/model haiku"    # Default
-./tools/send-cmd.sh "/model sonnet"   # Medium complexity
-./tools/send-cmd.sh "/model opus"     # Complex planning
-```
-
----
-
-## Telegram Communication
-
-**Critical: The user can only see Telegram messages.** They cannot see your internal tool output, thinking, research, or brainstorming. If you don't send a Telegram message, they don't know what you're doing.
-
-**Rule:** For any non-trivial task (research, git ops, API calls, multi-step work), send an immediate acknowledgement via the `reply` tool **before any tool calls**. When complete, send findings immediately.
-
-**Rule:** Every user-facing answer — including short ones like "no results found" or "done" — **must** be sent via the `reply` tool. Never leave a final answer only in the assistant text output; the user cannot see that.
-
-**Why:** Silence looks like you've disappeared, even if you're actively working. Noah has explicitly called this out — the ack must come first, not after the work is done.
-
-### Response Style
-
-Write Telegram responses in a natural, conversational tone — like an executive assistant would communicate. Avoid defaulting to bullet points or structured lists unless the content genuinely benefits from that format or the user explicitly asks for it. Default to prose.
-
-**Code blocks:** Use `format: "markdownv2"` with triple backticks to send syntax-highlighted code blocks. Plain text code blocks don't render nicely on Telegram.
+> **Note:** the Ararat Telegram bot was retired (Sept 2026). The bot, its patched MCP
+> plugin, the `--remote-control` shim, and the `com.noahbres.ararat` launchd agent are all
+> gone; the trackers and `private-data/` live on and are updated from normal sessions. See
+> git history for the removed pieces.
 
 ---
 
 ## Remembering Instructions
 
 **Always default to CLAUDE.md** for any instruction, rule, or preference the user wants saved. Do NOT use the memory system unless the content is sensitive, private, or personally identifying (i.e., something that shouldn't be in a public GitHub repo). If in doubt, use CLAUDE.md.
-
----
-
-## Scheduled Tasks
-
-When the user asks "what are your scheduled tasks" or similar, only report **session crons** (CronList). Do NOT check or mention remote triggers unless explicitly asked.
 
 ---
 
@@ -83,7 +34,7 @@ When scheduling cron jobs or reminders, always be timezone-aware:
 
 ## Caffeine Tracking
 
-Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine intake. Use the current time in both UTC and Pacific (default timezone).
+Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine intake in a session. Use the current time in both UTC and Pacific (default timezone).
 
 **Format:** append a row to the markdown table:
 ```
@@ -98,7 +49,7 @@ Log entries to `private-data/caffeine-tracker.md` whenever Noah reports caffeine
 
 ## Mood Tracking
 
-Log entries to `private-data/mood-tracker.md` whenever Noah reports his mood. Use exact UTC and Pacific times. Mood is free-form text.
+Log entries to `private-data/mood-tracker.md` whenever Noah reports his mood in a session. Use exact UTC and Pacific times. Mood is free-form text.
 
 **Format:** append a row to the markdown table:
 ```
@@ -109,7 +60,7 @@ Log entries to `private-data/mood-tracker.md` whenever Noah reports his mood. Us
 
 ## Alcohol Tracking
 
-Log entries to `private-data/alcohol-tracker.md` whenever Noah reports drinking. Use Pacific date.
+Log entries to `private-data/alcohol-tracker.md` whenever Noah reports drinking in a session. Use Pacific date.
 
 **Format:** append a row to the markdown table:
 ```
@@ -126,7 +77,7 @@ Log entries to `private-data/alcohol-tracker.md` whenever Noah reports drinking.
 
 ## Nicotine Tracking
 
-Log entries to `private-data/nicotine-tracker.md` whenever Noah reports nicotine intake. Use the current time in both UTC and Pacific (default timezone).
+Log entries to `private-data/nicotine-tracker.md` whenever Noah reports nicotine intake in a session. Use the current time in both UTC and Pacific (default timezone).
 
 **Format:** append a row to the markdown table:
 ```
@@ -145,37 +96,6 @@ Log entries to `private-data/nicotine-tracker.md` whenever Noah reports nicotine
 
 ---
 
-## Session Clearing
-
-When the user asks to clear the session (e.g., "clear pls", "clear", or similar), run:
-
-```sh
-./tools/send-cmd.sh "/clear"
-```
-
-This clears the Ararat remote control session's context.
-
-## Restarting Ararat
-
-When asked to restart (e.g., "restart", "restart yourself", "restart ararat"):
-
-1. **Save cron state first** — Call `CronList` and write the results to `cron-state.json` in the repo root. This preserves scheduled jobs across the restart.
-2. Then restart using the `restart-ararat` shell alias. Do NOT use launchctl or other custom commands.
-
-Note: restarting will terminate the current session, so this should be the last action taken.
-
-### On session start after a restart
-
-A `SessionStart` hook (`restore-crons.sh`) runs automatically on every new session. If `cron-state.json` exists, the hook outputs instructions into your context telling you to recreate the cron jobs. When you see that message:
-1. Call `CronCreate` for each job in the file
-2. Delete `cron-state.json`
-
-**Note:** Do NOT save/restore crons between `/clear` sessions — only for full service restarts.
-
-## Voice Note Transcription
-
-Voice messages are transcribed automatically by the Telegram MCP plugin before delivery — the transcript arrives as the message text. No manual steps needed. The raw audio file is saved to the inbox for posterity.
-
 ## Available Capabilities
 
 **Keep this section up to date.** Whenever a new skill or tool is added to the repo, add it here. This is the authoritative reference for what's available in this session.
@@ -183,7 +103,6 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 
 
 ### MCP Tools
-- **Telegram** — `reply`, `react`, `edit_message`, `download_attachment` (primary user interface); plugin is based on https://github.com/anthropics/claude-plugins-official/blob/main/external_plugins/telegram/README.md
 - **Google Calendar** — `mcp__claude_ai_Google_Calendar__authenticate` + calendar tools (read/create events)
 - **CardPointers** — `list_my_cards`, `recommend_card`, `search_my_offers`, `list_my_offers` (credit card recommendations and offers)
 
@@ -199,26 +118,28 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 ### Local Files
 
 **`notes/`**
-- `notes/plans/rtk-api.md` — implementation plan for the `rtk-api` personal API/MCP server on rtk (api.noahbres.com / mcp.noahbres.com); read before working on that project
 - `notes/SHOPPING-GENERAL.md` — general shopping list; read/update when user asks about shopping
-- `notes/NOTES.md` — project implementation notes (Telegram plugin setup, etc.)
+- `notes/NOTES.md` — repo-wide implementation notes (the rtk Cloudflare Tunnel, deploy-rs, DNS). **rtk-api's own notes live in `rtk-api/notes/`, not here.**
 - `notes/llm-projects.md` — curated list of interesting LLM-related projects
 
 **`rtk-api/`**
-- Private authenticated HTTP/MCP server for personal tools (Things 3, iMessage), deployed on `rtk` as `api.noahbres.com` / `mcp.noahbres.com`. See `notes/plans/rtk-api.md` (plan) and `notes/NOTES.md` (rtk-api section) for details; `rtk-api/README.md` for dev usage.
+- Private authenticated HTTP/MCP server for personal tools (Things 3, iMessage), deployed on `rtk` as `api.noahbres.com` / `mcp.noahbres.com`.
+- **All rtk-api notes live in `rtk-api/notes/`** — keep them there, not in `notes/`:
+  - `rtk-api/notes/NOTES.md` — current state: architecture, auth/principals, credentials, Cloudflare objects, gotchas, open items.
+  - `rtk-api/notes/plan.md` — original design doc and rollout phases.
+  - `rtk-api/README.md` — dev/usage docs.
 
 **`tools/`**
-- `tools/send-cmd.sh` — sends a slash command to the Ararat remote control session (e.g. `/clear`, `/model haiku`)
-- `tools/restore-crons.sh` — SessionStart hook; recreates cron jobs from `cron-state.json` after a restart
 - `tools/things-today-tracker.py` — flags Things 3 "Today" tasks that have been sitting for 10+ days and sends a Telegram alert; see `tools/things-today-tracker.md` for full docs
 - `tools/things-today-tracker.md` — documentation for the things-today-tracker script (launchd schedule, usage, data store location)
 - `tools/imessage-query.py` — queries chat.db for messages by phone/email identifier; used by the imessage-lookup skill
 - `tools/contacts-search.py` — fuzzy-searches AddressBook contacts by name; used by the contacts-search skill
+- `tools/sync-private-data.sh` — bidirectional rsync of `private-data/` between this machine and `rtk.local`
 - `rtk-api/deploy.sh` — deploys rtk-api on `rtk` (git pull, `uv sync --frozen`, restart launchd agent, poll `/health`); `--remote` runs it over SSH from `rnn`
 
 **`private-data/`** (gitignored)
 
-**Proactive updates:** When you encounter information that seems useful to remember — about people, preferences, habits, recurring situations, or anything personal — write it to the appropriate file in `private-data/` without being asked. Always notify Noah in the Telegram reply when you do (e.g. "I've noted X's address in contacts."). Use good judgment about what's worth keeping.
+**Proactive updates:** When you encounter information that seems useful to remember — about people, preferences, habits, recurring situations, or anything personal — write it to the appropriate file in `private-data/` without being asked. Always tell Noah when you do (e.g. "I've noted X's address in contacts."). Use good judgment about what's worth keeping.
 
 - `private-data/contacts.md` — private contact notes (addresses, phone numbers, gate codes, etc.); **fuzzy-search this first** whenever Noah asks about a person by name (e.g. "is X in contacts?", "what's X's address?", "do we have notes on X?").
 - `private-data/caffeine-tracker.md` — caffeine intake log; append entries when Noah reports caffeine
@@ -244,7 +165,8 @@ runs with `nixos-config/` as its working directory. `just` alone lists them.
 agents never run `just nix deploy-rtk` themselves. Prepare and verify (`just nix build-rtk`, `nix
 eval`), then ask Noah to run `just nix build-deploy-rtk`, and confirm afterwards over SSH (`readlink
 /nix/var/nix/profiles/system` must advance — silent rollbacks have happened). Python-only changes
-to rtk-api deploy without root via `rtk-api/deploy.sh --remote`. Full notes: `notes/NOTES.md`.
+to rtk-api deploy without root via `rtk-api/deploy.sh --remote`. Full notes: `notes/NOTES.md`
+(host/deploy) and `rtk-api/notes/NOTES.md` (the service itself).
 
 ---
 

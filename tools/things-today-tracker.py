@@ -23,26 +23,31 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 DATA_FILE = REPO_ROOT / "private-data" / "things-today-tracker.json"
 TELEGRAM_ENV_FILE = Path.home() / ".claude" / "channels" / "telegram" / ".env"
-CHAT_ID = "227506906"
 DEFAULT_THRESHOLD = 10
 
 
-def get_bot_token() -> str:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    if token:
-        return token
+def read_env_value(key: str) -> str:
+    """Read KEY from the environment, else from TELEGRAM_ENV_FILE (KEY=value lines)."""
+    value = os.environ.get(key)
+    if value:
+        return value
     if TELEGRAM_ENV_FILE.exists():
         for line in TELEGRAM_ENV_FILE.read_text().splitlines():
             line = line.strip()
-            if line.startswith("TELEGRAM_BOT_TOKEN="):
-                return line.split("=", 1)[1]
-    raise RuntimeError("TELEGRAM_BOT_TOKEN not found")
+            if line.startswith(f"{key}="):
+                value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if value:
+                    return value
+    raise RuntimeError(
+        f"{key} not found: set it in the environment or add a `{key}=...` line to {TELEGRAM_ENV_FILE}"
+    )
 
 
 def send_telegram(text: str):
-    token = get_bot_token()
+    token = read_env_value("TELEGRAM_BOT_TOKEN")
+    chat_id = read_env_value("TELEGRAM_CHAT_ID")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
     req = urllib.request.Request(url, data=data, method="POST")
     with urllib.request.urlopen(req) as resp:
         return json.loads(resp.read())

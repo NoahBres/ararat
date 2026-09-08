@@ -12,8 +12,12 @@ Tracks how long tasks have been sitting in Things 3 "Today" and sends a Telegram
 ## Key files
 - **Script:** `tools/things-today-tracker.py`
 - **Data store:** `private-data/things-today-tracker.json` (gitignored — persists across sessions)
-- **Bot token:** read from `~/.claude/channels/telegram/.env` (TELEGRAM_BOT_TOKEN).
-  This outlives the retired Ararat assistant on purpose — the token is independent of
+- **Bot token and chat id:** `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, each read from the
+  environment first, then from `~/.claude/channels/telegram/.env`. The script raises a
+  `RuntimeError` naming the missing key if either is absent. The chat id (Noah's Telegram user
+  id) is recorded in `private-data/infra-ids.md`; it has to be present in that `.env` on `rtk`
+  (which runs the launchd job) and on any machine you run the script from by hand.
+  This `.env` outlives the retired Ararat assistant on purpose — the token is independent of
   that session, so this alert kept working when the bot was torn down. Don't clean it up.
 - **launchd agent:** defined in `~/Developer/nixos-config/hosts/rtk/home.nix` as `launchd.agents.things-today-tracker`
   - Label: `com.noahbres.things-today-tracker`

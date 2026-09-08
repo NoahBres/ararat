@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -96,7 +97,11 @@ def test_add_unconfirmed_when_poll_finds_nothing(monkeypatch):
 
 
 def test_update_requires_auth_token(monkeypatch):
-    monkeypatch.delenv("THINGS_AUTH_TOKEN", raising=False)
+    # Stub get_settings directly: deleting the env var is not enough, since
+    # get_settings() re-injects missing keys from ~/.config/rtk-api/env.
+    monkeypatch.setattr(
+        things_tools, "get_settings", lambda: SimpleNamespace(things_auth_token=None)
+    )
     with pytest.raises(ValueError, match="THINGS_AUTH_TOKEN"):
         things_tools.update("abc123", title="new title")
 
@@ -186,7 +191,10 @@ def test_add_project_builds_expected_url_and_confirms(monkeypatch):
 
 
 def test_batch_requires_auth_token(monkeypatch):
-    monkeypatch.delenv("THINGS_AUTH_TOKEN", raising=False)
+    # See test_update_requires_auth_token: stub settings, don't rely on env.
+    monkeypatch.setattr(
+        things_tools, "get_settings", lambda: SimpleNamespace(things_auth_token=None)
+    )
     with pytest.raises(ValueError, match="THINGS_AUTH_TOKEN"):
         things_tools.batch([{"type": "to-do", "attributes": {"title": "x"}}])
 

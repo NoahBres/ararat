@@ -5,7 +5,9 @@
 The Telegram bot, its patched MCP plugin (`telegram-plugin/`), the `claude-telegram.sh`
 `--remote-control` shim, and the `com.noahbres.ararat` launchd agent on `rtk` were removed
 in Sept 2026 — the bot wasn't used enough to justify running it. The trackers and
-`private-data/` it fed are unaffected. Everything removed is recoverable from git history.
+`private-data/` it fed are unaffected. Everything removed is recoverable from git history — **see
+`notes/ararat-telegram-retired.md`** for the full inventory, where the data lives, and
+step-by-step revival instructions.
 
 Note the rtk-api approval bot is a *separate* Telegram bot with its own token and is still
 live — see `rtk-api/notes/NOTES.md`.

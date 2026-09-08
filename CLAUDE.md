@@ -10,8 +10,8 @@ dots across sessions rather than answering narrowly.
 
 > **Note:** the Ararat Telegram bot was retired (Sept 2026). The bot, its patched MCP
 > plugin, the `--remote-control` shim, and the `com.noahbres.ararat` launchd agent are all
-> gone; the trackers and `private-data/` live on and are updated from normal sessions. See
-> git history for the removed pieces.
+> gone; the trackers and `private-data/` live on and are updated from normal sessions.
+> `notes/ararat-telegram-retired.md` has the inventory, the data map, and revival steps.
 >
 > **Do not delete `~/.claude/channels/telegram/.env`.** The bot token there is independent
 > of the retired remote-control session, and `tools/things-today-tracker.py` still reads it

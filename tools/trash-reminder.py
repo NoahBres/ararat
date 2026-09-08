@@ -269,37 +269,38 @@ def recent_chat_messages(numbers: list[str], since: datetime, limit: int = 200) 
 def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool:
     """Confirm our send landed (outbound row in the groupchat matching text).
 
-    Outbound group sends often land with text=NULL and the body only in
-    attributedBody, so match against both (same CAST trick as search).
+    Outbound group sends often land with text=NULL and the body only in the
+    attributedBody NSArchiver blob. The blob doesn't survive CAST(.. AS TEXT)
+    (binary headers break UTF-8 conversion and truncate before our text), so
+    match in Python: plain-text compare plus a raw UTF-8 byte-substring scan
+    of the blob, which always contains the ASCII runs contiguously.
     """
     import time
 
-    # The blob holds raw UTF-8, so only a contiguous ASCII run from the text
-    # can match it with LIKE (an emoji in the middle breaks contiguity).
     ascii_runs = re.findall(r"[\x20-\x7e]{10,}", text)
     snippet = max(ascii_runs, key=len).strip() if ascii_runs else text[:60]
-    snippet = snippet.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    needle = snippet.encode("utf-8")
     deadline = time.monotonic() + 5.0
     since_ns = int((since.timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
     while time.monotonic() < deadline:
         conn = _open()
         try:
-            row = conn.execute(
-                """SELECT 1
+            rows = conn.execute(
+                """SELECT DISTINCT m.text as t, m.attributedBody as ab
                    FROM message m
                    JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-                   JOIN chat c ON c.ROWID = cmj.chat_id
-                   JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+                   JOIN chat_handle_join chj ON chj.chat_id = cmj.chat_id
                    JOIN handle h ON h.ROWID = chj.handle_id
-                    WHERE h.id LIKE :n AND m.is_from_me = 1
+                   WHERE h.id LIKE :n AND m.is_from_me = 1
                      AND m.date >= :since
-                     AND (m.text LIKE :q ESCAPE '\\' OR CAST(m.attributedBody AS TEXT) LIKE :q ESCAPE '\\')
-                    LIMIT 1""",
-                {"n": f"%{numbers[0]}%", "since": since_ns,
-                 "q": f"%{snippet}%", "escape": "\\"},
-            ).fetchone()
-            if row is not None:
-                return True
+                   ORDER BY m.date DESC LIMIT 30""",
+                {"n": f"%{numbers[0]}%", "since": since_ns},
+            ).fetchall()
+            for r in rows:
+                if snippet in (r["t"] or ""):
+                    return True
+                if needle in (r["ab"] or b""):
+                    return True
         finally:
             conn.close()
         time.sleep(0.5)

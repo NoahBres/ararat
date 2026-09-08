@@ -60,11 +60,13 @@
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt-tree;
 
       # Remote deploy to the headless Mac mini: `just deploy-rtk` (see justfile).
-      # Builds the rtk closure locally, copies it over the Cloudflare-tunnel SSH
-      # alias, activates with interactive sudo (no NOPASSWD needed), and rolls
-      # back automatically if it can't reconnect afterwards (magic rollback).
+      # Builds the rtk closure locally, copies it over SSH (preferring the
+      # Tailscale link, rtk.local, and falling back to the Cloudflare Access
+      # tunnel if that's unreachable), activates with interactive sudo (no
+      # NOPASSWD needed), and rolls back automatically if it can't reconnect
+      # afterwards (magic rollback).
       deploy.nodes.rtk = {
-        hostname = "rtk-cloudflare"; # ssh alias from hosts/common/darwin/home.nix
+        hostname = "rtk"; # ssh alias from hosts/common/darwin/home.nix
         sshUser = "noah";
         user = "root";
         interactiveSudo = true;
@@ -72,7 +74,7 @@
         profiles.system.path = deploy-rs.lib.aarch64-darwin.activate.darwin self.darwinConfigurations.rtk;
       };
 
-      packages.aarch64-darwin.deploy-rs = nixpkgs.legacyPackages.aarch64-darwin.deploy-rs; # binary-cached, same CLI
+      packages.aarch64-darwin.deploy-rs = deploy-rs.packages.aarch64-darwin.deploy-rs; # match the activation lib's version (avoids confirm-handshake mismatch)
 
       checks.aarch64-darwin = {
         pre-commit-check = git-hooks.lib.aarch64-darwin.run {

@@ -28,6 +28,34 @@ let
   cy-kimi =
     mkOpenRouterWrapper "cy-kimi" "moonshotai/kimi-k2.5" "moonshotai/kimi-k2.5"
       "moonshotai/kimi-k2.5";
+
+  # ssh -> rtk: try the Tailscale link (rtk.local) first, fall back to the
+  # Cloudflare Access tunnel otherwise. Asks the local tailscaled (via `tailscale
+  # status`, an instant IPC call -- no network round trip) whether Tailscale is
+  # up and rtk is currently online *before* touching the network, so we skip
+  # straight to Cloudflare instead of eating a multi-second connect timeout
+  # whenever Tailscale itself is off. Only when that heuristic looks good do we
+  # spend a short bounded probe confirming rtk.local:22 actually answers.
+  rtkSshProxy = pkgs.writeShellScript "rtk-ssh-proxy" ''
+    set -euo pipefail
+
+    cloudflare_fallback() {
+      exec ${pkgs.cloudflared}/bin/cloudflared access ssh --hostname ssh-rtk.noahbres.com
+    }
+
+    status=$(tailscale status --json 2>/dev/null) || cloudflare_fallback
+    rtk_online=$(printf '%s' "$status" | ${pkgs.jq}/bin/jq -r '
+      (.BackendState == "Running") as $up
+      | ([.Peer // {} | to_entries[] | select(.value.HostName == "rtk") | .value.Online][0] // false) as $peerOnline
+      | ($up and $peerOnline)
+    ' 2>/dev/null) || rtk_online=false
+
+    if [ "$rtk_online" = "true" ] && nc -z -w1 rtk.local 22 2>/dev/null; then
+      exec nc rtk.local 22
+    else
+      cloudflare_fallback
+    fi
+  '';
   cy-ant =
     mkOpenRouterWrapper "cy-ant" "anthropic/claude-opus-4.6" "anthropic/claude-sonnet-4.6"
       "anthropic/claude-haiku-4.5";
@@ -79,6 +107,23 @@ in
           hostname = "ssh-rtk.noahbres.com";
           user = "noah";
           proxyCommand = "cloudflared access ssh --hostname %h";
+          # deploy-rs makes several SSH calls in a row (activate, then a separate
+          # sudo'd "wait" call for magic-rollback confirmation). Without multiplexing
+          # each call gets a fresh pty, so sudo's credential cache from the first
+          # password prompt doesn't carry to the next one -- it just silently
+          # reprompts (empty -p "") and looks like a hung confirmation.
+          controlMaster = "auto";
+          controlPath = "~/.ssh/sockets/%r@%h-%p";
+          controlPersist = "10m";
+        };
+        # Preferred alias: Tailscale (rtk.local) first, Cloudflare Access as fallback.
+        rtk = {
+          hostname = "rtk.local";
+          user = "noah";
+          proxyCommand = "${rtkSshProxy}";
+          controlMaster = "auto";
+          controlPath = "~/.ssh/sockets/%r@%h-%p";
+          controlPersist = "10m";
         };
       };
     };
@@ -171,6 +216,11 @@ in
           ${pkgs.git}/bin/git clone https://github.com/noahbres/$repo "$HOME/Developer/$repo"
         fi
       done
+    '';
+
+    activation.createSshSockets = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p "$HOME/.ssh/sockets"
+      chmod 700 "$HOME/.ssh/sockets"
     '';
 
     stateVersion = "25.05";

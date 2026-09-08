@@ -79,9 +79,9 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
 
 ## Deploying nix config to `rtk` (deploy-rs)
 
-`rtk` is headless and reachable only through the Cloudflare tunnel, so nix changes are pushed
-from `rnn` with [deploy-rs](https://github.com/serokell/deploy-rs) rather than by SSHing in and
-running `darwin-rebuild` there. Set up 2026-09-08. Node config: `deploy.nodes.rtk` in
+`rtk` is headless, so nix changes are pushed from `rnn` with
+[deploy-rs](https://github.com/serokell/deploy-rs) rather than by SSHing in and running
+`darwin-rebuild` there. Set up 2026-09-08. Node config: `deploy.nodes.rtk` in
 `nixos-config/flake.nix`; recipes in `nixos-config/justfile`.
 
 Why deploy-rs and not `darwin-rebuild --target-host`: nix-darwin has no upstream remote-deploy
@@ -91,10 +91,16 @@ and never needs a NOPASSWD rule. Consequence: **nix deploys to rtk are human-onl
 run them non-interactively. Code deploys for rtk-api don't need root and stay agent-runnable.
 
 **How it works:** builds the rtk closure locally on `rnn` (`remoteBuild = false`, so the mini
-never compiles anything), `nix copy`s it over the `rtk-cloudflare` SSH alias, activates via
-`sudo` on rtk, then reconnects to confirm. If it can't reconnect within the timeout (e.g. the
-new config broke `cloudflared` or sshd), rtk rolls back to the previous generation by itself
-("magic rollback"). This is the whole point — a bad deploy can't strand the box.
+never compiles anything), `nix copy`s it over the `rtk` SSH alias, activates via `sudo` on rtk,
+then reconnects to confirm. If it can't reconnect within the timeout (e.g. the new config broke
+`cloudflared` or sshd), rtk rolls back to the previous generation by itself ("magic rollback").
+This is the whole point — a bad deploy can't strand the box.
+
+The `rtk` SSH alias (`nixos-config/hosts/common/darwin/home.nix`) prefers the Tailscale link
+(`rtk.local`) and falls back to the Cloudflare Access tunnel (`ssh-rtk.noahbres.com`) if
+`rtk.local:22` isn't reachable within 2s — a small `ProxyCommand` script (`rtkSshProxy`) does the
+probe-and-fallback. The old Cloudflare-only alias, `rtk-cloudflare`, is still there if you need to
+force that path.
 
 **Commands** (run from `rnn`, inside `nixos-config/`):
 
@@ -128,7 +134,8 @@ Nix's "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys 
 - The old `switch-rtk` recipe used to SSH to `rtk.local` and run `just switch` in
   `~/Developer/nixos-config` — that path is the pre-merge standalone checkout on rtk and is stale.
   The live config is `~/Developer/ararat/nixos-config`. The stale checkout can be deleted.
-- `just deploy-rtk` needs rnn on a network where `cloudflared access ssh` works (any internet).
+- `just deploy-rtk` needs rnn to reach rtk over either Tailscale (`rtk.local`) or the internet
+  (for `cloudflared access ssh` as fallback).
 - Home-manager is integrated as a nix-darwin module, so user-level launchd agents also go through
   this root-level deploy; there is no sudo-free path for them today.
 

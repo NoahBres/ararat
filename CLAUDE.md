@@ -192,6 +192,7 @@ Voice messages are transcribed automatically by the Telegram MCP plugin before d
 - **gws-gmail** / **gws-gmail-read** — send and read Gmail
 - **imessage-lookup** — look up iMessages by contact name (resolves name → identifier → chat.db)
 - **contacts-search** — fuzzy-search contacts by name; returns phone numbers / emails
+- **agent-browser** — browser automation CLI (navigate, fill forms, click, screenshot, scrape); prefer it over built-in browser/web tools. Vendored at `.claude/skills/agent-browser/`, pinned in `nixos-config/skills-lock.json`
 - **shiori-sh** — save URLs to Shiori and search/list saved bookmarks (`bunx @shiori-sh/cli`)
 - Other Google Workspace skills available at https://github.com/googleworkspace/cli
 

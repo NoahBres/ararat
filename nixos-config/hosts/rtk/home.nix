@@ -77,6 +77,59 @@ in
     };
   };
 
+  # trash-reminder -- roommate trash pickup reminder for the groupchat.
+  # See tools/trash-reminder.py. The script decides from the date whether
+  # tonight is due (provisional heads-up 2 nights before pickup, final
+  # reminder 1 night before) and no-ops otherwise, so all four slots are
+  # listed and only the due one fires:
+  #   normal week (Tue pickup): Sun 20:00 provisional, Mon 19:00 final
+  #   slip week   (Wed pickup): Mon 20:00 provisional, Tue 19:00 final
+  # First run needs two manual grants over Screen Sharing: Full Disk Access
+  # for /usr/bin/python3 (chat.db skip-scan) and the Messages Automation
+  # prompt (first osascript send). Run tools/trash-reminder.py --probe
+  # first — it triggers the Automation prompt without sending anything.
+  launchd.agents.trash-reminder = {
+    enable = true;
+    waitForNixStore = false; # show as "trash-reminder" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
+    config = {
+      Label = "com.noahbres.trash-reminder";
+      ProgramArguments = [
+        "/usr/bin/python3"
+        "${config.home.homeDirectory}/Developer/ararat/tools/trash-reminder.py"
+      ];
+      WorkingDirectory = "${config.home.homeDirectory}/Developer/ararat";
+      EnvironmentVariables = {
+        PATH = "/opt/homebrew/bin:/etc/profiles/per-user/noah/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+        LANG = "en_US.UTF-8";
+        LC_ALL = "en_US.UTF-8";
+      };
+      StartCalendarInterval = [
+        {
+          Weekday = 0;
+          Hour = 20;
+          Minute = 0;
+        } # Sun 8pm: provisional (normal weeks)
+        {
+          Weekday = 1;
+          Hour = 19;
+          Minute = 0;
+        } # Mon 7pm: final (normal weeks)
+        {
+          Weekday = 1;
+          Hour = 20;
+          Minute = 0;
+        } # Mon 8pm: provisional (slip weeks)
+        {
+          Weekday = 2;
+          Hour = 19;
+          Minute = 0;
+        } # Tue 7pm: final (slip weeks)
+      ];
+      StandardOutPath = "/tmp/trash-reminder.log";
+      StandardErrorPath = "/tmp/trash-reminder-error.log";
+    };
+  };
+
   # rtk-api -- personal API + MCP server (api.noahbres.com / mcp.noahbres.com).
   # See notes/plans/rtk-api.md for the full design.
   #

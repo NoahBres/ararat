@@ -71,7 +71,10 @@ ALIASES = {
     "daniel": "daniel",
 }
 
-SKIP_RE = re.compile(r"\bbot\s+skip\s+([a-z]+)", re.IGNORECASE)
+# Skip commands match at the START of a message (leading whitespace ok), so
+# multiline texts like "bot skip me\nim gone for the week" work. Anything
+# after the name is ignored.
+SKIP_RE = re.compile(r"bot\s+skip\s+([a-z]+)", re.IGNORECASE)
 
 # osascript finds the group chat by participant handles at send time and
 # sends to it. Recipient/text travel as argv — never interpolated.
@@ -306,8 +309,10 @@ def parse_skips(
 ) -> tuple[set[str], list[str]]:
     """Returns (skipped people, human-readable log lines).
 
-    Anyone may skip themselves ("bot skip me"); only Noah (outbound messages,
-    is_from_me) may skip someone else ("bot skip <name>").
+    Commands match at the start of a message, so "bot skip me\\nim gone for
+    the week" works; trailing text is ignored. Anyone may skip themselves
+    ("bot skip me"); only Noah (outbound messages, is_from_me) may skip
+    someone else ("bot skip <name>").
     """
     handle_to_person = {num: person for person, num in numbers.items()}
     skipped: set[str] = set()
@@ -323,7 +328,8 @@ def parse_skips(
             )
         if sender is None:
             continue
-        for match in SKIP_RE.finditer(m["text"] or ""):
+        match = SKIP_RE.match((m["text"] or "").lstrip())
+        if match:
             target = match.group(1).lower()
             if target == "me":
                 skipped.add(sender)
@@ -367,10 +373,10 @@ def send_text(text: str, numbers: list[str], dry_run: bool) -> str:
 # ---- main ----------------------------------------------------------------
 
 PROVISIONAL_TPL = (
-    "🗑️ Trash heads-up: {name} is up for {day} pickup. "
+    "[BOT] 🗑️ Trash heads-up: {name} is up for {day} pickup. "
     "Reply 'bot skip me' to pass (Noah can 'bot skip <name>')."
 )
-FINAL_TPL = "🗑️ Trash reminder: {name}, you're up — bins out by 6am {day}!{skipped}"
+FINAL_TPL = "[BOT] 🗑️ Trash reminder: {name}, you're up — bins out by 6am {day}!{skipped}"
 
 
 def main() -> None:

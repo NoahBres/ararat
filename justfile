@@ -1,17 +1,16 @@
 # Root justfile for the ararat repo.
 #
-# nixos-config has its own justfile whose recipes must run from that directory
-# (they use `--flake .#<host>`). Exposing it as a module preserves that: every
-# `just nix <recipe>` runs with nixos-config/ as the working directory.
+# nixos-config/justfile is imported here, so its recipes are available from the
+# repo root with the same names (`just deploy-rtk`, `just build-rtk`, ...).
+# They use `source_directory()` for the flake path, so they resolve to
+# nixos-config/ no matter where they're invoked from — one file, can't drift.
 #
-#   just --list nix          # list the nix-darwin recipes
-#   just nix                 # CAREFUL: runs the module's DEFAULT recipe
-#                            # (`nix flake update`), it does not list
-#   just nix build-rtk
-#   just nix build-deploy-rtk
+#   just --list          # list everything, including the nix recipes
+#   just build-rtk
+#   just build-deploy-rtk
 
-mod nix 'nixos-config'
+import 'nixos-config/justfile'
 
-# Default: show everything, including module recipes.
+# Default: show everything.
 default:
-  @just --list --list-submodules
+  @just --list

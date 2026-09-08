@@ -1,26 +1,32 @@
 # Auto-detect the current host for local darwin builds
 host := `scutil --get LocalHostName`
 
+# Directory of THIS file. The repo-root justfile imports this file, so a bare
+# `.#foo` would resolve against the repo root when invoked from there.
+# `source_directory()` is this file's dir either way, so every recipe works
+# identically from the repo root and from nixos-config/.
+flake := source_directory()
+
 update:
-  nix flake update
+  nix flake update --flake {{flake}}
 
 # Auto-detect host and build/switch local darwin config
 build:
-  sudo darwin-rebuild build --flake .#{{host}}
+  sudo darwin-rebuild build --flake {{flake}}#{{host}}
 
 switch:
-  sudo darwin-rebuild switch --flake .#{{host}}
+  sudo darwin-rebuild switch --flake {{flake}}#{{host}}
 
 # Explicit per-host local commands
 build-rnn:
-  sudo darwin-rebuild build --flake .#rnn
+  sudo darwin-rebuild build --flake {{flake}}#rnn
 
 switch-rnn:
-  sudo darwin-rebuild switch --flake .#rnn
+  sudo darwin-rebuild switch --flake {{flake}}#rnn
 
 # Build the exact closure deploy-rtk will ship (no sudo needed; leaves ./result).
 build-rtk:
-  nix build .#deploy.nodes.rtk.profiles.system.path
+  nix build {{flake}}#deploy.nodes.rtk.profiles.system.path --out-link {{flake}}/result
 
 # Build, then deploy (deploy reuses the just-built store path).
 build-deploy-rtk: build-rtk deploy-rtk
@@ -29,12 +35,12 @@ build-deploy-rtk: build-rtk deploy-rtk
 # rtk-cloudflare SSH alias, activates with an interactive sudo prompt, magic
 # rollback if the box doesn't come back). Node config: `deploy.nodes.rtk` in flake.nix.
 deploy-rtk:
-  nix run .#deploy-rs -- .#rtk
+  nix run {{flake}}#deploy-rs -- {{flake}}#rtk
 
 # Dry run: build + copy, but don't activate.
 deploy-rtk-dry:
-  nix run .#deploy-rs -- .#rtk --dry-activate
+  nix run {{flake}}#deploy-rs -- {{flake}}#rtk --dry-activate
 
 # Local-only fallback (run ON rtk).
 switch-rtk:
-  sudo darwin-rebuild switch --flake .#rtk
+  sudo darwin-rebuild switch --flake {{flake}}#rtk

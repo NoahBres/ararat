@@ -260,7 +260,7 @@ canonical copies here now.
 | `imessage.with_contact(contact, days=90, limit=50, keyword=None)` | Messages to/from a contact (fuzzy name or phone/email), optionally filtered by keyword. |
 | `imessage.search(query, days=365, limit=50)` | Search message bodies. |
 | `imessage.unread()` | Unread inbound messages. |
-| `imessage.send(to, text)` | **Write.** Gated -- see below. |
+| `imessage.send(to, text)` | **Write.** `to` must be an exact phone/email, not a name. Gated -- see below. |
 
 Read tool rows look like:
 
@@ -301,8 +301,16 @@ should return messages, not an FDA error.
 `imessage.send` refuses to do anything unless both are true:
 
 - `IMESSAGE_WRITE_ENABLED=true`
-- the resolved recipient identifier is in `IMESSAGE_WRITE_ALLOWLIST`
+- the recipient identifier is in `IMESSAGE_WRITE_ALLOWLIST`
   (comma-separated phone numbers/emails, e.g. `+15551234567,friend@example.com`)
+
+`to` must already be a phone number or email address; it is normalised
+(digits plus leading `+` for phones, lowercased for emails) and compared to
+the allowlist as-is. Contact *names* are rejected with a 400 -- there is no
+fuzzy matching on the send path, because a name that resolves to the wrong
+person would send the message to them. Resolve the name first with a read
+tool (`imessage.with_contact` accepts fuzzy names and returns the `sender`
+identifiers) and pass the exact identifier back.
 
 It also refuses group chats and caps `text` at 2000 characters. It sends via
 `osascript` with `on run argv` so the recipient and text are passed as
@@ -328,7 +336,8 @@ curl -s localhost:8787/v1/imessage/search -H "Authorization: Bearer $T" \
 
 curl -s localhost:8787/v1/imessage/unread -H "Authorization: Bearer $T" -d '{}'
 
-# write -- only works once IMESSAGE_WRITE_ENABLED=true and the recipient is allowlisted
+# write -- only works once IMESSAGE_WRITE_ENABLED=true and the recipient is allowlisted;
+# `to` must be a phone/email, never a contact name
 curl -s localhost:8787/v1/imessage/send -H "Authorization: Bearer $T" \
   -d '{"to": "+15551234567", "text": "running late, be there in 10"}'
 ```

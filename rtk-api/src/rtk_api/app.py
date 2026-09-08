@@ -25,9 +25,42 @@ from rtk_api import __version__
 # Import side effect: populates rtk_api.registry.REGISTRY.
 from rtk_api import tools as _tools  # noqa: F401
 from rtk_api.audit import audit_log
-from rtk_api.auth import AuthMiddleware, Principal
+from rtk_api.auth import AuthMiddleware, Principal, redact_path
 from rtk_api.config import get_settings
+from rtk_api.lib.imessage_db import ImessageAccessError
 from rtk_api.registry import REGISTRY, ToolSpec
+
+#: Largest request body a tool call will accept. Tool kwargs are small (the
+#: biggest legitimate payload is a things.batch command list); anything past
+#: this is a mistake or an attempt to exhaust memory, and gets a 413 before
+#: we parse it.
+MAX_BODY_BYTES = 1 * 1024 * 1024
+
+
+class BodyTooLarge(Exception):
+    pass
+
+
+async def _read_body_limited(request: Request, limit: int = MAX_BODY_BYTES) -> bytes:
+    """Read the request body, refusing early. Checks Content-Length when the
+    client sent one, and also counts the bytes actually received so a
+    chunked or lying client can't slip past the header check.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > limit:
+                raise BodyTooLarge
+        except ValueError:
+            pass  # malformed header; fall through to counting the real bytes
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise BodyTooLarge
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -253,6 +286,10 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def _log_requests(request: Request, call_next):
         request_id = uuid_lib.uuid4().hex[:12]
+        # Exposed so handlers can echo it in error responses -- the caller
+        # gets a handle to correlate with the server log without the server
+        # having to leak exception detail.
+        request.state.request_id = request_id
         start = time.perf_counter()
         response = await call_next(request)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
@@ -262,7 +299,7 @@ def create_app() -> FastAPI:
             extra={
                 "request_id": request_id,
                 "principal": principal.name if principal else None,
-                "path": request.url.path,
+                "path": redact_path(request.url.path, settings),
                 "duration_ms": duration_ms,
             },
         )
@@ -334,7 +371,13 @@ def create_app() -> FastAPI:
                 {"ok": False, "error": f"unknown tool {full_name!r}"}, status_code=404
             )
 
-        body_bytes = await request.body()
+        try:
+            body_bytes = await _read_body_limited(request)
+        except BodyTooLarge:
+            return JSONResponse(
+                {"ok": False, "error": f"request body exceeds {MAX_BODY_BYTES} bytes"},
+                status_code=413,
+            )
         kwargs: dict[str, Any] = {}
         if body_bytes:
             try:
@@ -362,9 +405,25 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-        except Exception as exc:
-            logging.getLogger("rtk_api").exception("tool call failed", extra={"tool": full_name})
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        except ImessageAccessError as exc:
+            # Operational, not secret: the message is the FDA how-to, which
+            # is exactly what the caller needs to see to get unstuck.
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+        except PermissionError as exc:
+            # Tool-level refusals (kill switch off, recipient not allowlisted)
+            # are deliberate messages for the caller, not internal state.
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
+        except Exception:
+            request_id = getattr(request.state, "request_id", None)
+            logging.getLogger("rtk_api").exception(
+                "tool call failed", extra={"tool": full_name, "request_id": request_id}
+            )
+            # Never echo str(exc): tracebacks / paths / env detail stay in the
+            # server log, keyed by request_id for correlation.
+            return JSONResponse(
+                {"ok": False, "error": "internal error", "request_id": request_id},
+                status_code=500,
+            )
 
         return JSONResponse({"ok": True, "result": result})
 

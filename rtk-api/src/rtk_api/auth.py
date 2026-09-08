@@ -82,6 +82,42 @@ class Principal:
         return any(fnmatch(tool_name, pattern) for pattern in self.require_approval)
 
 
+MCP_SECRET_PLACEHOLDER = "<mcp-secret>"
+
+
+def _first_path_segment(path: str) -> str:
+    """'/abc/def' -> 'abc'; '/abc' -> 'abc'; '/' -> ''."""
+    return path.lstrip("/").split("/", 1)[0]
+
+
+def is_mcp_path(path: str, settings: Settings) -> bool:
+    """True if `path` is `/{RTK_API_MCP_SECRET}` or `/{RTK_API_MCP_SECRET}/...`.
+
+    The first segment is compared with `hmac.compare_digest` rather than
+    `str.startswith` so a probing client can't learn the secret one byte at
+    a time from response timing.
+    """
+    secret = settings.rtk_api_mcp_secret
+    if not secret:
+        return False
+    segment = _first_path_segment(path)
+    return hmac.compare_digest(segment.encode("utf-8"), secret.encode("utf-8"))
+
+
+def redact_path(path: str, settings: Settings) -> str:
+    """Replace the MCP secret in `path` with `<mcp-secret>` before it is
+    logged, so the capability URL never lands in /tmp/rtk-api.log.
+
+    Substring replacement (not just the exact first segment) on purpose: a
+    near-miss probe like `/{secret}x` is a 401 that would otherwise log the
+    full secret alongside it.
+    """
+    secret = settings.rtk_api_mcp_secret
+    if secret and secret in path:
+        return path.replace(secret, MCP_SECRET_PLACEHOLDER)
+    return path
+
+
 def _owner(kind: str) -> Principal:
     """The unscoped principal: Noah, via Cloudflare Access or the legacy
     bearer token. Named explicitly rather than left as an implicit bypass so
@@ -187,8 +223,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # below, and the MCP mount registers the *whole* registry -- holding
         # this secret means holding every tool. Per-client scoping does not
         # apply to the MCP surface; see README.
-        mcp_secret = settings.rtk_api_mcp_secret
-        if mcp_secret and (path == f"/{mcp_secret}" or path.startswith(f"/{mcp_secret}/")):
+        if is_mcp_path(path, settings):
             request.state.principal = Principal(name="mcp", kind="mcp-secret", allow=("*",))
             return await call_next(request)
 
@@ -226,5 +261,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         client_ip = request.headers.get(
             "CF-Connecting-IP", request.client.host if request.client else "?"
         )
-        logger.warning("unauthorized request", extra={"path": path, "ip": client_ip})
+        logger.warning(
+            "unauthorized request",
+            extra={"path": redact_path(path, settings), "ip": client_ip},
+        )
         return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)

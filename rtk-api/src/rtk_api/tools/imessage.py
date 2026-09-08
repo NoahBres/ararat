@@ -98,19 +98,31 @@ def unread(limit: int = 50) -> list[dict]:
 
 
 def _resolve_send_target(to: str) -> str:
-    matches = contacts.resolve(to)
-    if not matches or not matches[0]["identifiers"]:
-        raise ValueError(f"could not resolve {to!r} to a phone number or email")
-    return matches[0]["identifiers"][0]
+    """`to` must already be a phone number or email. Deliberately *no* fuzzy
+    contact matching here: a name that fuzzy-matches the wrong person would
+    send a message to them, and the allowlist check below would be against
+    whoever the matcher happened to rank first. Resolve names with a read
+    tool (imessage.with_contact / contacts) and pass the identifier back.
+    """
+    if not contacts.looks_like_identifier(to):
+        raise ValueError(
+            f"imessage.send requires `to` to be a phone number or email, got {to!r}; "
+            "resolve the contact name first (e.g. via imessage.with_contact) and "
+            "pass the exact identifier"
+        )
+    return contacts.normalize_identifier(to)
 
 
 @tool("imessage.send", write=True)
 def send(to: str, text: str) -> dict:
-    """Send an iMessage. Refuses unless IMESSAGE_WRITE_ENABLED is set and the
-    resolved recipient identifier is in IMESSAGE_WRITE_ALLOWLIST. Refuses
-    group chats. Caps `text` at 2000 characters. Sends via osascript
-    (recipient/text passed as argv, never interpolated into the script), then
-    polls chat.db for ~3s to confirm the outbound message landed."""
+    """Send an iMessage. `to` must be an exact phone number (e.g.
+    "+15551234567") or email -- contact names are rejected; resolve them
+    first with imessage.with_contact. Refuses unless IMESSAGE_WRITE_ENABLED
+    is set and the normalised recipient identifier is in
+    IMESSAGE_WRITE_ALLOWLIST. Refuses group chats. Caps `text` at 2000
+    characters. Sends via osascript (recipient/text passed as argv, never
+    interpolated into the script), then polls chat.db for ~3s to confirm the
+    outbound message landed."""
     settings = get_settings()
 
     if not settings.imessage_write_enabled:

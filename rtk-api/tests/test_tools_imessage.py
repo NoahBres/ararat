@@ -82,6 +82,47 @@ def test_send_refuses_when_not_in_allowlist(monkeypatch):
         imessage_tools.send(to="+15551234567", text="hi")
 
 
+def test_send_rejects_contact_name(monkeypatch):
+    """No fuzzy matching on the send path: a name must be resolved to an
+    identifier by the caller first, even if it would match a contact."""
+    monkeypatch.setenv("IMESSAGE_WRITE_ENABLED", "true")
+    monkeypatch.setenv("IMESSAGE_WRITE_ALLOWLIST", "+15551234567")
+
+    def boom(*a, **k):
+        raise AssertionError("contacts.resolve must not be consulted by imessage.send")
+
+    monkeypatch.setattr(imessage_tools.contacts, "resolve", boom)
+    with pytest.raises(ValueError, match="resolve the contact name first"):
+        imessage_tools.send(to="Kirill", text="hi")
+
+
+@pytest.mark.parametrize(
+    ("raw", "normalised"),
+    [
+        ("+1 (555) 123-4567", "+15551234567"),
+        ("  Friend@Example.com ", "friend@example.com"),
+    ],
+)
+def test_send_normalises_identifier_before_allowlist(monkeypatch, raw, normalised):
+    monkeypatch.setenv("IMESSAGE_WRITE_ENABLED", "true")
+    monkeypatch.setenv("IMESSAGE_WRITE_ALLOWLIST", normalised)
+    monkeypatch.setattr(imessage_tools.imessage_db, "is_group_identifier", lambda ident: False)
+    monkeypatch.setattr(
+        imessage_tools.imessage_db, "find_recent_outbound", lambda *a, **k: {"rowid": 1}
+    )
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(imessage_tools.subprocess, "run", fake_run)
+
+    result = imessage_tools.send(to=raw, text="hi")
+    assert result["to"] == normalised
+    assert captured["argv"][-2] == normalised
+
+
 def test_send_refuses_text_too_long(monkeypatch):
     monkeypatch.setenv("IMESSAGE_WRITE_ENABLED", "true")
     monkeypatch.setenv("IMESSAGE_WRITE_ALLOWLIST", "+15551234567")
@@ -115,7 +156,7 @@ def test_send_allowed_calls_osascript_with_argv_and_confirms(monkeypatch):
 
     monkeypatch.setattr(imessage_tools.subprocess, "run", fake_run)
 
-    result = imessage_tools.send(to="Kirill", text="running late, be there in 10")
+    result = imessage_tools.send(to="+15551234567", text="running late, be there in 10")
 
     assert captured["argv"][0] == "osascript"
     assert captured["argv"][-2:] == ["+15551234567", "running late, be there in 10"]

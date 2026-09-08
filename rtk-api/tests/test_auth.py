@@ -159,6 +159,38 @@ def test_secret_path_ok(monkeypatch):
         assert resp.status_code != 401
 
 
+def test_is_mcp_path_matches_exact_first_segment_only(monkeypatch):
+    """`/{secret}` and `/{secret}/...` match; prefixes, superstrings and the
+    secret in a later segment do not. (The compare itself is
+    hmac.compare_digest on the first segment.)"""
+    from rtk_api.auth import is_mcp_path
+    from rtk_api.config import get_settings
+
+    monkeypatch.setenv("RTK_API_MCP_SECRET", "s3cret")
+    settings = get_settings()
+    assert is_mcp_path("/s3cret", settings)
+    assert is_mcp_path("/s3cret/", settings)
+    assert is_mcp_path("/s3cret/mcp", settings)
+    assert not is_mcp_path("/s3cretx", settings)
+    assert not is_mcp_path("/s3cre", settings)
+    assert not is_mcp_path("/v1/s3cret", settings)
+    assert not is_mcp_path("/", settings)
+    assert not is_mcp_path("/s3crét", settings)  # non-ASCII must not raise
+
+    monkeypatch.delenv("RTK_API_MCP_SECRET", raising=False)
+    get_settings.cache_clear()
+    assert not is_mcp_path("/", get_settings())
+    assert not is_mcp_path("/anything", get_settings())
+
+
+def test_secret_prefix_probe_is_401(monkeypatch):
+    monkeypatch.setenv("RTK_API_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("RTK_API_MCP_SECRET", "s3cret")
+    with TestClient(create_app()) as client:
+        assert client.get("/s3cretx/mcp").status_code == 401
+        assert client.get("/s3cre/mcp").status_code == 401
+
+
 def test_client_token_header_authenticates(monkeypatch):
     client = _client(monkeypatch, clients=INSTINCT)
     resp = client.post(

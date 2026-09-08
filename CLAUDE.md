@@ -143,6 +143,13 @@ Log entries to `private-data/nicotine-tracker.md` whenever Noah reports nicotine
 
 **`private-data/`** (gitignored)
 
+**These files exist on both this machine and `rtk`, and nothing syncs them automatically.**
+The retired Ararat session ran on `rtk` and appended there, so `rtk` held the authoritative
+copy; the two were reconciled on 2026-09-08. Now that entries are written from whichever
+machine you're sitting at, run `tools/sync-private-data.sh` (bidirectional rsync, newer file
+wins) before reading a tracker for analysis and after appending to one — otherwise the halves
+drift apart again.
+
 **Proactive updates:** When you encounter information that seems useful to remember — about people, preferences, habits, recurring situations, or anything personal — write it to the appropriate file in `private-data/` without being asked. Always tell Noah when you do (e.g. "I've noted X's address in contacts."). Use good judgment about what's worth keeping.
 
 - `private-data/contacts.md` — private contact notes (addresses, phone numbers, gate codes, etc.); **fuzzy-search this first** whenever Noah asks about a person by name (e.g. "is X in contacts?", "what's X's address?", "do we have notes on X?").
@@ -151,6 +158,7 @@ Log entries to `private-data/nicotine-tracker.md` whenever Noah reports nicotine
 - `private-data/alcohol-tracker.md` — alcohol intake log (date, time of day, little/medium/lot); append entries when Noah reports drinking
 - `private-data/mood-tracker.md` — mood log with exact UTC + Pacific timestamps; free-form mood text
 - `private-data/sleep-tracker.md` — sleep log
+- `private-data/supplement-tracker.md` — supplement log (amount, supplement, UTC + Pacific, notes); half serving = 50% of the labeled serving
 - `private-data/things-today-tracker.json` — persistent UUID → first_seen map used by things-today-tracker.py
 - `private-data/event-notes.md` — temporary notes tied to upcoming events (trips, reservations, deadlines, etc.); search this when Noah asks about something specific. Each entry has an expiry date — when expired or the event passes, **move** the entry to `event-notes-archive.md` rather than deleting it.
 - `private-data/event-notes-archive.md` — cold storage for expired event notes. Do NOT load this proactively — only search it if Noah explicitly asks about something historical.

@@ -87,7 +87,9 @@ new config broke `cloudflared` or sshd), rtk rolls back to the previous generati
 
 ```sh
 just deploy-rtk-dry   # build + copy, don't activate — sanity check first
+just build-rtk        # build the exact closure deploy-rtk ships, no sudo (leaves ./result)
 just deploy-rtk       # build, copy, activate (prompts for rtk sudo password), auto-rollback
+just build-deploy-rtk # build-rtk then deploy-rtk, so the build finishes before the sudo prompt
 just switch-rtk       # local-only fallback: run ON rtk, plain darwin-rebuild switch
 just switch           # rnn itself (unchanged)
 ```

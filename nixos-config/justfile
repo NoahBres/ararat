@@ -18,8 +18,12 @@ build-rnn:
 switch-rnn:
   sudo darwin-rebuild switch --flake .#rnn
 
+# Build the exact closure deploy-rtk will ship (no sudo needed; leaves ./result).
 build-rtk:
-  sudo darwin-rebuild build --flake .#rtk
+  nix build .#deploy.nodes.rtk.profiles.system.path
+
+# Build, then deploy (deploy reuses the just-built store path).
+build-deploy-rtk: build-rtk deploy-rtk
 
 # Remote deploy to rtk via deploy-rs (builds locally, copies over the
 # rtk-cloudflare SSH alias, activates with an interactive sudo prompt, magic

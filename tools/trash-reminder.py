@@ -217,37 +217,37 @@ def apple_ts_to_dt(ns: int) -> datetime:
     return datetime.fromtimestamp(ns / 1e9 + APPLE_EPOCH_OFFSET, tz=ZoneInfo("UTC")).astimezone(PACIFIC)
 
 
-def recent_chat_messages(numbers: list[str], since: datetime, limit: int = 200) -> list[dict]:
-    """Inbound messages in the roommate groupchat since `since`.
+def _find_group_rid(conn, numbers: list[str]) -> int:
+    """ROWID of the roommate groupchat: the group chat (style=43) whose
+    participants include every number. Shared by reads so they match the
+    same chat the send script targets."""
+    chats = conn.execute("""
+        SELECT c.ROWID as rid, c.guid FROM chat c WHERE c.style = 43
+    """).fetchall()
+    for ch in chats:
+        parts = {
+            r["id"]
+            for r in conn.execute(
+                """SELECT h.id as id FROM chat_handle_join chj
+                   JOIN handle h ON h.ROWID = chj.handle_id
+                   WHERE chj.chat_id = :rid""",
+                {"rid": ch["rid"]},
+            ).fetchall()
+        }
+        if all(any(n in (p or "") for p in parts) for n in numbers):
+            return ch["rid"]
+    sys.exit("trash-reminder: group chat not found in chat.db")
 
-    Matches the chat by participant handles (same rule as the send script),
-    so guid churn can't desync reads from writes.
-    """
+
+def new_messages_with_ids(numbers: list[str], since_ns: int, limit: int = 200) -> list[dict]:
+    """All messages (inbound + outbound) in the groupchat with Apple date >=
+    `since_ns`, oldest first. Each row: rowid, sender ("me" = Noah), text."""
     conn = _open()
     try:
-        chats = conn.execute("""
-            SELECT c.ROWID as rid, c.guid FROM chat c WHERE c.style = 43
-        """).fetchall()
-        chat_rid = None
-        for ch in chats:
-            parts = {
-                r["id"]
-                for r in conn.execute(
-                    """SELECT h.id as id FROM chat_handle_join chj
-                       JOIN handle h ON h.ROWID = chj.handle_id
-                       WHERE chj.chat_id = :rid""",
-                    {"rid": ch["rid"]},
-                ).fetchall()
-            }
-            if all(any(n in (p or "") for p in parts) for n in numbers):
-                chat_rid = ch["rid"]
-                break
-        if chat_rid is None:
-            sys.exit("trash-reminder: group chat not found in chat.db")
-        since_ns = int((since.timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
+        chat_rid = _find_group_rid(conn, numbers)
         rows = conn.execute(
-            """SELECT m.date as date, m.text as text, m.is_from_me as me,
-                      h.id as sender
+            """SELECT m.ROWID as rowid, m.date as date, m.text as text,
+                      m.is_from_me as me, h.id as sender
                FROM message m
                JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
                LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -256,14 +256,32 @@ def recent_chat_messages(numbers: list[str], since: datetime, limit: int = 200) 
                ORDER BY m.date ASC LIMIT :limit""",
             {"rid": chat_rid, "since": since_ns, "limit": limit},
         ).fetchall()
-        out = []
-        for r in rows:
-            sender = "me" if r["me"] else r["sender"]  # outbound == Noah
-            out.append({"date": apple_ts_to_dt(r["date"]), "sender": sender,
-                        "text": r["text"]})
-        return out
+        return [
+            {"rowid": r["rowid"], "date": apple_ts_to_dt(r["date"]),
+             "sender": "me" if r["me"] else r["sender"],  # outbound == Noah
+             "text": r["text"]}
+            for r in rows
+        ]
     finally:
         conn.close()
+
+
+def apple_ns_now() -> int:
+    """Current time as Apple nanoseconds (for state cursors)."""
+    return int((datetime.now(ZoneInfo("UTC")).timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
+
+
+def recent_chat_messages(numbers: list[str], since: datetime, limit: int = 200) -> list[dict]:
+    """Messages (inbound + outbound) in the roommate groupchat since `since`.
+
+    Matches the chat by participant handles (same rule as the send script),
+    so guid churn can't desync reads from writes.
+    """
+    since_ns = int((since.timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
+    return [
+        {"date": m["date"], "sender": m["sender"], "text": m["text"]}
+        for m in new_messages_with_ids(numbers, since_ns, limit)
+    ]
 
 
 def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool:
@@ -381,7 +399,7 @@ PROVISIONAL_TPL = (
     "[BOT] 🗑️ Trash heads-up: {name} is up for {day} pickup. "
     "Reply 'bot skip me' to pass (Noah can 'bot skip <name>')."
 )
-FINAL_TPL = "[BOT] 🗑️ Trash reminder: {name}, you're up for {day} pickup!{skipped}"
+FINAL_TPL = "[BOT] 🗑️ Trash reminder: {name}, you're up for {day} pickup.{skipped}"
 
 
 def main() -> None:

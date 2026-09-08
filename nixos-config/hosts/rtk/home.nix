@@ -130,6 +130,33 @@ in
     };
   };
 
+  # trash-skip-watcher -- instant acks for "bot skip" commands.
+  # Companion to trash-reminder: runs every 5 minutes, scans the groupchat
+  # for new messages, and replies [BOT] to skip commands during the active
+  # window (1-2 nights before pickup). Read-only outside the window.
+  # Same grants as trash-reminder (FDA for /usr/bin/python3, Messages
+  # Automation); first run initializes its cursor so history never replays.
+  launchd.agents.trash-skip-watcher = {
+    enable = true;
+    waitForNixStore = false; # show as "trash-skip-watcher" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
+    config = {
+      Label = "com.noahbres.trash-skip-watcher";
+      ProgramArguments = [
+        "/usr/bin/python3"
+        "${config.home.homeDirectory}/Developer/ararat/tools/trash-skip-watcher.py"
+      ];
+      WorkingDirectory = "${config.home.homeDirectory}/Developer/ararat";
+      EnvironmentVariables = {
+        PATH = "/opt/homebrew/bin:/etc/profiles/per-user/noah/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+        LANG = "en_US.UTF-8";
+        LC_ALL = "en_US.UTF-8";
+      };
+      StartInterval = 300;
+      StandardOutPath = "/tmp/trash-skip-watcher.log";
+      StandardErrorPath = "/tmp/trash-skip-watcher-error.log";
+    };
+  };
+
   # rtk-api -- personal API + MCP server (api.noahbres.com / mcp.noahbres.com).
   # See notes/plans/rtk-api.md for the full design.
   #

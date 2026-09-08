@@ -23,16 +23,48 @@ live — see `rtk-api/notes/NOTES.md`.
 
 - **On `rtk`**: `cloudflared` runs as a launchd agent (`com.noahbres.cloudflared`, defined in `nixos-config/hosts/rtk/home.nix`) using a tunnel token stored at `/etc/cloudflared/tunnel-token`. That token must be manually deployed to the machine (it's not checked into the repo) — see the comment above `launchd.agents.cloudflared` in that file for the exact steps and where to find the token in Cloudflare Zero Trust (Networks → Tunnels → `<tunnel>` → Configure → Install connector).
 - **Public hostname**: `ssh-rtk.noahbres.com` — routes through the tunnel to `rtk`'s SSH port.
-- **No Cloudflare Access policy is currently attached** to that hostname — anyone who knows the hostname can reach the SSH port through the tunnel. The actual auth boundary today is SSH itself (publickey, with password/keyboard-interactive also offered by the server). Standing up an Access policy (email OTP / SSO / service token) is a reasonable hardening step since it isn't there yet.
+- **Cloudflare Access app `ssh-rtk`** (self-hosted, domain `ssh-rtk.noahbres.com`, 24h session;
+  app id in `private-data/infra-ids.md`) gates that hostname at the edge as of 2026-09-08. Two
+  policies, so there are exactly two ways in:
+  1. `rtk-api service token (owner)` — a `non_identity` (Service Auth) policy for the owner's own
+     `rtk-api` service token (the same one `api.noahbres.com` uses). This is the non-interactive
+     path the SSH aliases use. The `instinct` service token is deliberately **not** included —
+     instinct gets the API, never the shell.
+  2. `owner email OTP` — an `allow` policy for `noahbres@gmail.com`, for a browser login via
+     `cloudflared access ssh` when the service token isn't at hand. **Caveat:** the One-time PIN
+     login method still has to be enabled on the Zero Trust team (Settings → Authentication →
+     Login methods → One-time PIN). The scoped API token in 1Password can't create identity
+     providers (`auth.forbidden`), so this is a one-click dashboard step for Noah; until then
+     only the service-token path works.
+  Verified 2026-09-08: unauthenticated `https://ssh-rtk.noahbres.com/` now 302s to the Access
+  login (was 200 straight from the tunnel), and `ssh` with the service token exported still
+  reaches rtk.
+- **sshd on rtk accepts keys only.** `services.openssh.extraConfig` in
+  `nixos-config/hosts/rtk/configuration.nix` writes `PasswordAuthentication no`,
+  `KbdInteractiveAuthentication no`, `ChallengeResponseAuthentication no`, `PermitRootLogin no`
+  into `/etc/ssh/sshd_config.d/100-nix-darwin.conf` (macOS's `sshd_config` includes that
+  directory; nix-darwin already owns that file). Written 2026-09-08, **pending
+  `just build-deploy-rtk`**; verify afterwards with
+  `ssh rtk 'sudo sshd -T | grep -i passwordauth'` → `passwordauthentication no`.
 - **`cloudflared` is installed on both hosts** via `home.packages` in `nixos-config/hosts/common/darwin/home.nix` (used on `rnn` as the client, and on `rtk` for both the client and the tunnel daemon above).
 
-To connect from `rnn` (or any machine with `cloudflared` + the right SSH key):
+To connect from `rnn`, use the `rtk` or `rtk-cloudflare` SSH alias (see the deploy-rs section
+below). Both run the same `rtk-ssh-proxy` script from
+`nixos-config/hosts/common/darwin/home.nix`; on the tunnel path it reads the service token from
+1Password (`op read "op://Private/rtk-api cloudflare access service token/client_id"` and
+`.../credential`) into `TUNNEL_SERVICE_TOKEN_ID` / `TUNNEL_SERVICE_TOKEN_SECRET` for
+`cloudflared access ssh`, respects those variables if already exported, and falls back to
+cloudflared's interactive browser login if `op` is locked or unavailable. From a machine without
+the nix config:
 
 ```sh
+export TUNNEL_SERVICE_TOKEN_ID=$(op read "op://Private/rtk-api cloudflare access service token/client_id")
+export TUNNEL_SERVICE_TOKEN_SECRET=$(op read "op://Private/rtk-api cloudflare access service token/credential")
 ssh -o ProxyCommand="cloudflared access ssh --hostname %h" noah@ssh-rtk.noahbres.com
 ```
 
-Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separate Cloudflare Access login/service-token step needed since no Access policy is enforced.
+SSH itself still authenticates with the standard identity (`~/.ssh/id_rsa` on `rnn`, in
+`~/.ssh/authorized_keys` on rtk) — Access is a second gate in front of it, not a replacement.
 
 ## rtk-api (api.noahbres.com)
 
@@ -66,10 +98,11 @@ errors). `magicRollback` is **on** (fixed 2026-09-08 — see gotchas for the act
 - `rtk` — preferred. ProxyCommand script tries the LAN/Tailscale path (`rtk.local`) first, falls
   back to the Cloudflare Access tunnel. Uses ControlMaster so deploy-rs's several SSH calls share
   one connection.
-- `rtk-ts` — pure Tailscale (`rtk.taile4ea05.ts.net`, rtk = 100.83.51.37, rnn = 100.108.87.111).
+- `rtk-ts` — pure Tailscale (`rtk.<tailnet>.ts.net`; tailnet name and both hosts' 100.x IPs are
+  in `private-data/infra-ids.md`).
 - `rtk-cloudflare` — Cloudflare tunnel only (`ssh-rtk.noahbres.com` via `cloudflared access ssh`).
 
-**Commands** (from `rnn`, inside `nixos-config/`):
+**Commands** (from anywhere in the repo — the root justfile imports `nixos-config/justfile`):
 
 ```sh
 just build-rtk        # build the exact closure deploy-rtk ships, no sudo (leaves ./result)
@@ -126,7 +159,7 @@ The "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys th
 - **Registrar**: Namecheap. **DNS**: actually delegated to **Cloudflare**
   (`aldo.ns.cloudflare.com` / `destiny.ns.cloudflare.com`) — Namecheap's own "Advanced DNS" panel
   is inert for this domain (DNS Type shows "Custom DNS"); all real record edits happen in
-  Cloudflare. Zone ID: `1a485d0b081c74cfe34537c498114b55`.
+  Cloudflare. Zone ID (and the record/rule ids below) in `private-data/infra-ids.md`.
 - **Site**: hosted on Notion (a page published via Notion Sites), CNAME'd from
   `www.noahbres.com` -> `external.notion.site`, proxied through Cloudflare.
   `www.noahbres.com` is the **paid** custom domain slot in Notion (Public pages -> Domains,
@@ -136,11 +169,11 @@ The "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys th
   downtime). Decided against both; see below for the free workaround.
 - **Apex (`noahbres.com`, no www)**: as of 2026-09-08, resolves via a free-tier setup instead of a
   second Notion domain:
-  1. Cloudflare CNAME record `noahbres.com` -> `external.notion.site`, proxied (id
-     `066c515f3eb7bfd69b6940578920225c`). This exists just so Cloudflare's edge sees traffic for
+  1. Cloudflare CNAME record `noahbres.com` -> `external.notion.site`, proxied (record id in
+     `infra-ids.md`). This exists just so Cloudflare's edge sees traffic for
      the apex (Notion itself 403s the bare domain since only `www` is registered there).
   2. Cloudflare **Page Rule** (Free plan, 3-rule quota) `noahbres.com/*` -> 301 redirect to
-     `https://www.noahbres.com/$1` (id `926e3397abadd76ce51621fc3f30c74b`). This is what actually
+     `https://www.noahbres.com/$1` (rule id in `infra-ids.md`). This is what actually
      makes the apex work — it intercepts before hitting Notion.
 - **API tokens**: two narrowly-scoped Cloudflare tokens were created for this and saved in
   1Password — "Cloudflare - noahbres.com DNS edit token" and "Cloudflare - noahbres.com Page

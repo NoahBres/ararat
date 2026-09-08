@@ -36,12 +36,41 @@ let
   # straight to Cloudflare instead of eating a multi-second connect timeout
   # whenever Tailscale itself is off. Only when that heuristic looks good do we
   # spend a short bounded probe confirming rtk.local:22 actually answers.
+  #
+  # `--cloudflare` skips the Tailscale probe and goes straight to the tunnel
+  # (used by the `rtk-cloudflare` alias so both aliases share one code path).
+  #
+  # ssh-rtk.noahbres.com sits behind a Cloudflare Access app ("ssh-rtk") that
+  # admits either the owner's `rtk-api` service token or a browser login as
+  # noahbres@gmail.com. cloudflared reads the service token from
+  # TUNNEL_SERVICE_TOKEN_ID/_SECRET, so we pull those from 1Password (item
+  # "rtk-api cloudflare access service token", fields client_id/credential)
+  # to keep the tunnel path non-interactive for scripts like deploy-rs. If
+  # the caller already exported them we leave them alone; if `op` is locked
+  # or unavailable we fall through to cloudflared's interactive browser
+  # login instead of failing.
   rtkSshProxy = pkgs.writeShellScript "rtk-ssh-proxy" ''
     set -euo pipefail
 
     cloudflare_fallback() {
+      if [ -z "''${TUNNEL_SERVICE_TOKEN_ID:-}" ] || [ -z "''${TUNNEL_SERVICE_TOKEN_SECRET:-}" ]; then
+        op_read() {
+          ${pkgs.coreutils}/bin/timeout 30 ${pkgs._1password-cli}/bin/op read \
+            "op://Private/rtk-api cloudflare access service token/$1" 2>/dev/null
+        }
+        if id=$(op_read client_id) && secret=$(op_read credential) \
+          && [ -n "$id" ] && [ -n "$secret" ]; then
+          export TUNNEL_SERVICE_TOKEN_ID="$id" TUNNEL_SERVICE_TOKEN_SECRET="$secret"
+        else
+          echo "rtk-ssh-proxy: could not read the Access service token from 1Password; falling back to browser login" >&2
+        fi
+      fi
       exec ${pkgs.cloudflared}/bin/cloudflared access ssh --hostname ssh-rtk.noahbres.com
     }
+
+    if [ "''${1:-}" = "--cloudflare" ]; then
+      cloudflare_fallback
+    fi
 
     status=$(tailscale status --json 2>/dev/null) || cloudflare_fallback
     rtk_online=$(printf '%s' "$status" | ${pkgs.jq}/bin/jq -r '
@@ -103,10 +132,12 @@ in
           hashKnownHosts = false;
           userKnownHostsFile = "~/.ssh/known_hosts";
         };
+        # Cloudflare tunnel only. Same proxy script as `rtk` below, forced onto
+        # the tunnel path (which fetches the Access service token from 1Password).
         rtk-cloudflare = {
           hostname = "ssh-rtk.noahbres.com";
           user = "noah";
-          proxyCommand = "cloudflared access ssh --hostname %h";
+          proxyCommand = "${rtkSshProxy} --cloudflare";
           # deploy-rs makes several SSH calls in a row (activate, then a separate
           # sudo'd "wait" call for magic-rollback confirmation). Without multiplexing
           # each call gets a fresh pty, so sudo's credential cache from the first

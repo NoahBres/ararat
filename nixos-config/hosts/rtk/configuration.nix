@@ -21,4 +21,20 @@
   # pty-bound) so the second call reuses it. Still requires the password once
   # -- not passwordless sudo.
   environment.etc."sudoers.d/deploy-rs-tty-tickets".text = "Defaults !tty_tickets\n";
+
+  # sshd hardening. rtk's SSH port is reachable from the internet through the
+  # Cloudflare tunnel (ssh-rtk.noahbres.com, behind a Cloudflare Access app),
+  # so the server itself must only ever accept keys. macOS's sshd_config does
+  # `Include /etc/ssh/sshd_config.d/*`, and nix-darwin already owns
+  # `100-nix-darwin.conf` in that directory (this option is its contents), so
+  # no extra environment.etc file is needed. Key auth is unaffected: Noah's key
+  # is in ~/.ssh/authorized_keys on rtk. Verify after deploy with
+  #   ssh rtk 'sudo sshd -T | grep -i passwordauth'
+  # `enable` is deliberately left at null (macOS keeps managing Remote Login).
+  services.openssh.extraConfig = ''
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    ChallengeResponseAuthentication no
+    PermitRootLogin no
+  '';
 }

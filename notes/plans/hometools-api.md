@@ -1,6 +1,6 @@
 # Plan: `hometools` — personal API + MCP server on the Mac mini (`rtk`)
 
-Status: **PLAN — not yet implemented.** Written 2026-09-07.
+Status: Written 2026-09-07. **Phases 1–3 implemented 2026-09-08** (code in `hometools/`, launchd agent in nix, verified end-to-end on rtk ad hoc). Remaining: Phase 0 manual steps (Cloudflare hostnames + Access, `just switch` on rtk, FDA grant) and optional Phase 4. MCP mount exists but is deprioritized.
 Audience: implementing agents (any model). Read the whole doc before starting a phase.
 Owner: Noah. Anything marked **[NOAH]** is a manual step only Noah can do (dashboard clicks, TCC prompts, secrets).
 

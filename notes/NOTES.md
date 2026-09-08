@@ -136,7 +136,9 @@ Nix's "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys 
   kills deploy-rs's SSH session, so it can't confirm and magic rollback reverts the whole deploy
   (and deletes the generation). Two deploys in a row silently rolled back this way. The `rtk`
   alias avoids this on the LAN; off-LAN use `rtk-ts` (pure Tailscale, `rtk.taile4ea05.ts.net`)
-  rather than letting it fall back to Cloudflare, or pass `--magic-rollback false` knowingly.
+  rather than letting it fall back to Cloudflare. **Magic rollback is now disabled** (`magicRollback = false`
+  in flake.nix) because its second sudo'd confirm call kept failing under interactive sudo and
+  reverting good deploys; `autoRollback` (activation-error revert) is still on.
 - The old `switch-rtk` recipe used to SSH to `rtk.local` and run `just switch` in
   `~/Developer/nixos-config` — that path is the pre-merge standalone checkout on rtk and is stale.
   The live config is `~/Developer/ararat/nixos-config`. The stale checkout can be deleted.

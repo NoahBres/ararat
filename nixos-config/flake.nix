@@ -70,6 +70,13 @@
         sshUser = "noah";
         user = "root";
         interactiveSudo = true;
+        # Magic rollback needs a *second* sudo'd SSH call to confirm after
+        # activation; with interactive sudo on macOS that step kept failing and
+        # silently reverting good deploys (3x on 2026-09-08). Off: one password,
+        # no confirm round-trip. autoRollback (revert if activation itself
+        # errors) stays on. rtk is reachable via Screen Sharing if a deploy
+        # ever breaks SSH.
+        magicRollback = false;
         remoteBuild = false;
         profiles.system.path = deploy-rs.lib.aarch64-darwin.activate.darwin self.darwinConfigurations.rtk;
       };

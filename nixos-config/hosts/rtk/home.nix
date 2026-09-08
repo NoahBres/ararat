@@ -84,16 +84,21 @@ in
   # listed and only the due one fires:
   #   normal week (Tue pickup): Sun 20:00 provisional, Mon 19:00 final
   #   slip week   (Wed pickup): Mon 20:00 provisional, Tue 19:00 final
-  # First run needs two manual grants over Screen Sharing: Full Disk Access
-  # for /usr/bin/python3 (chat.db skip-scan) and the Messages Automation
-  # prompt (first osascript send). Run tools/trash-reminder.py --probe
-  # first — it triggers the Automation prompt without sending anything.
+  # Runs through ~/Applications/trash-reminder.app (tools/trash-launcher/,
+  # built once on rtk) so the Full Disk Access grant is scoped to
+  # "trash-reminder" instead of system-wide /usr/bin/python3. Grant it over
+  # Screen Sharing, then run tools/trash-reminder.py --probe first — it
+  # triggers the Automation prompt without sending anything.
   launchd.agents.trash-reminder = {
     enable = true;
     waitForNixStore = false; # show as "trash-reminder" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
     config = {
       Label = "com.noahbres.trash-reminder";
+      # Makes System Settings > General > Login Items list this as
+      # "trash-reminder" (the launcher app's bundle) instead of "sh".
+      AssociatedBundleIdentifiers = [ "com.noahbres.trash-reminder" ];
       ProgramArguments = [
+        "${config.home.homeDirectory}/Applications/trash-reminder.app/Contents/MacOS/trash-reminder"
         "/usr/bin/python3"
         "${config.home.homeDirectory}/Developer/ararat/tools/trash-reminder.py"
       ];
@@ -134,14 +139,17 @@ in
   # Companion to trash-reminder: runs every 5 minutes, scans the groupchat
   # for new messages, and replies [BOT] to skip commands during the active
   # window (1-2 nights before pickup). Read-only outside the window.
-  # Same grants as trash-reminder (FDA for /usr/bin/python3, Messages
-  # Automation); first run initializes its cursor so history never replays.
+  # Runs through the same trash-reminder.app launcher (see above), so it is
+  # covered by the same scoped Full Disk Access grant. First run initializes
+  # its cursor so history never replays.
   launchd.agents.trash-skip-watcher = {
     enable = true;
     waitForNixStore = false; # show as "trash-skip-watcher" (not "sh") in Login Items; gui agents start after /nix/store is mounted anyway
     config = {
       Label = "com.noahbres.trash-skip-watcher";
+      AssociatedBundleIdentifiers = [ "com.noahbres.trash-reminder" ];
       ProgramArguments = [
+        "${config.home.homeDirectory}/Applications/trash-reminder.app/Contents/MacOS/trash-reminder"
         "/usr/bin/python3"
         "${config.home.homeDirectory}/Developer/ararat/tools/trash-skip-watcher.py"
       ];

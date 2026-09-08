@@ -1,12 +1,23 @@
 """Auth middleware for rtk-api.
 
-A request is authorized if ANY of:
-  1. `Cf-Access-Jwt-Assertion` header verifies against the Cloudflare Access
-     JWKS for the configured team domain, with `aud == CF_ACCESS_AUD`.
-  2. `Authorization: Bearer <RTK_API_BEARER_TOKEN>` (constant-time compare).
-  3. Path starts with `/{RTK_API_MCP_SECRET}/` (the MCP capability URL).
+Two questions, answered in that order: *who* is calling (authentication) and
+*what may they call* (authorization). Authentication resolves a `Principal`;
+`app.call_tool` enforces the principal's allowlist.
 
-`/health` is always unauthenticated. Everything else -> 401.
+A request resolves to a principal via the first of these that matches:
+  1. Path starts with `/{RTK_API_MCP_SECRET}/` (the MCP capability URL).
+  2. A named client credential -- `X-Rtk-Client-Token`, or
+     `Authorization: Bearer <token>` -- matching an entry in RTK_API_CLIENTS.
+     Checked *before* the Cloudflare JWT so a scoped identity always beats
+     the generic one when a client presents both (which external clients
+     must: the Access headers get them past the edge, the client token
+     tells us who they are).
+  3. `Cf-Access-Jwt-Assertion` verifying against the Cloudflare Access JWKS
+     for the configured team domain, with `aud == CF_ACCESS_AUD`.
+  4. `Authorization: Bearer <RTK_API_BEARER_TOKEN>` (constant-time compare).
+
+3 and 4 are the owner: unscoped, all tools. `/health` is always
+unauthenticated. Everything else -> 401.
 
 Never log secrets. Auth failures may log source IP but not token/JWT values.
 """
@@ -15,6 +26,8 @@ from __future__ import annotations
 
 import hmac
 import logging
+from dataclasses import dataclass
+from fnmatch import fnmatch
 
 import jwt
 from jwt import PyJWKClient
@@ -27,6 +40,46 @@ from rtk_api.config import Settings
 logger = logging.getLogger("rtk_api.auth")
 
 UNAUTHENTICATED_PATHS = {"/health"}
+
+#: Header an external client uses to identify itself. `Authorization: Bearer`
+#: works too and is checked as a fallback, but Cloudflare Access has a history
+#: of being fussy about forwarding `Authorization` to the origin -- a custom
+#: header passes through cleanly, so prefer it for anything behind Access.
+CLIENT_TOKEN_HEADER = "X-Rtk-Client-Token"
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Who is calling, and what they may call.
+
+    `allow` and `require_approval` are fnmatch patterns over tool names, e.g.
+    "things.*" or "imessage.send".
+
+    `require_approval` is checked *before* `allow` and overrides it, so a
+    broad grant like "imessage.*" can be narrowed by gating one tool out of
+    it. It is the placeholder for the human-in-the-loop approval queue;
+    nothing implements it yet, so a tool that matches it is refused rather
+    than silently allowed.
+    """
+
+    name: str
+    kind: str
+    allow: tuple[str, ...] = ()
+    require_approval: tuple[str, ...] = ()
+
+    def permits(self, tool_name: str) -> bool:
+        return any(fnmatch(tool_name, pattern) for pattern in self.allow)
+
+    def needs_approval(self, tool_name: str) -> bool:
+        return any(fnmatch(tool_name, pattern) for pattern in self.require_approval)
+
+
+def _owner(kind: str) -> Principal:
+    """The unscoped principal: Noah, via Cloudflare Access or the legacy
+    bearer token. Named explicitly rather than left as an implicit bypass so
+    every request goes through the same allowlist check.
+    """
+    return Principal(name="owner", kind=kind, allow=("*",))
 
 
 class _JWKSCache:
@@ -67,13 +120,45 @@ def _verify_cf_access_jwt(token: str, settings: Settings) -> bool:
         return False
 
 
-def _verify_bearer(header_value: str, settings: Settings) -> bool:
+def _bearer_value(header_value: str | None) -> str | None:
+    if not header_value or not header_value.startswith("Bearer "):
+        return None
+    return header_value[len("Bearer ") :]
+
+
+def _verify_bearer(header_value: str | None, settings: Settings) -> bool:
     if not settings.rtk_api_bearer_token:
         return False
-    if not header_value.startswith("Bearer "):
+    presented = _bearer_value(header_value)
+    if presented is None:
         return False
-    presented = header_value[len("Bearer ") :]
     return hmac.compare_digest(presented, settings.rtk_api_bearer_token)
+
+
+def _resolve_client(request: Request, settings: Settings) -> Principal | None:
+    """Match a presented client token against RTK_API_CLIENTS.
+
+    Compares against every configured client (no early exit) so the work done
+    doesn't depend on which client was presented.
+    """
+    presented = request.headers.get(CLIENT_TOKEN_HEADER) or _bearer_value(
+        request.headers.get("Authorization")
+    )
+    if not presented:
+        return None
+
+    matched: Principal | None = None
+    for name, spec in settings.clients.items():
+        if not spec.token:
+            continue
+        if hmac.compare_digest(presented, spec.token):
+            matched = Principal(
+                name=name,
+                kind="client",
+                allow=tuple(spec.allow),
+                require_approval=tuple(spec.require_approval),
+            )
+    return matched
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -90,22 +175,31 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         settings = self.settings
 
-        # Path 3: MCP capability URL prefix.
+        # 1. MCP capability URL prefix. NOTE: this short-circuits every check
+        # below, and the MCP mount registers the *whole* registry -- holding
+        # this secret means holding every tool. Per-client scoping does not
+        # apply to the MCP surface; see README.
         mcp_secret = settings.rtk_api_mcp_secret
         if mcp_secret and (path == f"/{mcp_secret}" or path.startswith(f"/{mcp_secret}/")):
-            request.state.principal = "mcp-secret"
+            request.state.principal = Principal(name="mcp", kind="mcp-secret", allow=("*",))
             return await call_next(request)
 
-        # Path 1: Cloudflare Access JWT.
+        # 2. Named client credential -- before the JWT, so a scoped identity
+        # wins over the generic one when both are presented.
+        client_principal = _resolve_client(request, settings)
+        if client_principal is not None:
+            request.state.principal = client_principal
+            return await call_next(request)
+
+        # 3. Cloudflare Access JWT.
         cf_jwt = request.headers.get("Cf-Access-Jwt-Assertion")
         if cf_jwt and _verify_cf_access_jwt(cf_jwt, settings):
-            request.state.principal = "cf-access"
+            request.state.principal = _owner("cf-access")
             return await call_next(request)
 
-        # Path 2: static bearer token.
-        auth_header = request.headers.get("Authorization")
-        if auth_header and _verify_bearer(auth_header, settings):
-            request.state.principal = "bearer"
+        # 4. Static bearer token.
+        if _verify_bearer(request.headers.get("Authorization"), settings):
+            request.state.principal = _owner("bearer")
             return await call_next(request)
 
         client_ip = request.headers.get(

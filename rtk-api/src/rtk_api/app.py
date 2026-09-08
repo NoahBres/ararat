@@ -99,7 +99,7 @@ def create_app() -> FastAPI:
             "request",
             extra={
                 "request_id": request_id,
-                "principal": principal,
+                "principal": principal.name if principal else None,
                 "path": request.url.path,
                 "duration_ms": duration_ms,
             },
@@ -112,7 +112,8 @@ def create_app() -> FastAPI:
         return {"ok": True, "version": __version__}
 
     @app.get("/v1/tools")
-    async def list_tools() -> dict:
+    async def list_tools(request: Request) -> dict:
+        principal = getattr(request.state, "principal", None)
         return {
             "ok": True,
             "result": [
@@ -124,12 +125,40 @@ def create_app() -> FastAPI:
                     "params_schema": spec.params_schema(),
                 }
                 for spec in REGISTRY.values()
+                if principal is None
+                or (principal.permits(spec.name) and not principal.needs_approval(spec.name))
             ],
         }
 
     @app.post("/v1/{tool_name}/{action}")
     async def call_tool(tool_name: str, action: str, request: Request) -> JSONResponse:
         full_name = f"{tool_name}.{action}"
+        principal = getattr(request.state, "principal", None)
+
+        # Authorize before the 404 so a scoped client can't enumerate which
+        # tools exist outside its grant.
+        #
+        # Approval is checked first, and deliberately overrides `allow`: a
+        # tool listed in `require_approval` is gated even if an `allow`
+        # pattern also matches it. Placeholder for the human-in-the-loop
+        # approval queue -- until that ships, such a tool is refused rather
+        # than allowed through unattended.
+        if principal is not None and principal.needs_approval(full_name):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": f"{full_name!r} requires approval, and the approval "
+                    "backend is not implemented yet",
+                },
+                status_code=403,
+            )
+
+        if principal is not None and not principal.permits(full_name):
+            return JSONResponse(
+                {"ok": False, "error": f"forbidden: {principal.name} may not call {full_name!r}"},
+                status_code=403,
+            )
+
         spec = REGISTRY.get(full_name)
         if spec is None:
             return JSONResponse(
@@ -151,10 +180,8 @@ def create_app() -> FastAPI:
                 )
             kwargs = parsed
 
-        principal = getattr(request.state, "principal", None)
-
         if spec.write:
-            audit_log(full_name, principal, kwargs)
+            audit_log(full_name, principal.name if principal else None, kwargs)
 
         try:
             # Tools are sync and may block on disk / subprocesses / TCC prompts;

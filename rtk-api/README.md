@@ -25,6 +25,7 @@ still take precedence over that file.
 | Variable | Purpose | Default |
 |---|---|---|
 | `RTK_API_BEARER_TOKEN` | Static bearer token accepted on `Authorization: Bearer <token>` | none (bearer auth disabled if unset) |
+| `RTK_API_CLIENTS` | JSON map of named, scoped API clients (see [Clients and scopes](#clients-and-scopes)) | empty (no scoped clients) |
 | `RTK_API_MCP_SECRET` | Capability-URL secret; if set, mounts the MCP app at `/<secret>/mcp` and that path prefix bypasses auth | none (MCP mount disabled if unset) |
 | `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com` | none (CF Access auth disabled if unset) |
 | `CF_ACCESS_AUD` | Cloudflare Access application AUD tag | none |
@@ -40,13 +41,71 @@ be rejected with 401.
 
 ## Auth
 
-Every request except `GET /health` must satisfy one of:
+Authentication resolves a **principal**; authorization then checks that
+principal's allowlist against the tool being called.
 
-1. `Cf-Access-Jwt-Assertion` header, verified against the Cloudflare Access
-   JWKS (`https://<team>/cdn-cgi/access/certs`) with the configured `aud`.
-2. `Authorization: Bearer <RTK_API_BEARER_TOKEN>`.
-3. Request path starts with `/<RTK_API_MCP_SECRET>/` (only the MCP mount
-   lives there).
+Every request except `GET /health` must resolve to a principal via the first
+of these that matches:
+
+1. Request path starts with `/<RTK_API_MCP_SECRET>/` (only the MCP mount
+   lives there) -> principal `mcp`, unscoped.
+2. A named client token in `X-Rtk-Client-Token` or `Authorization: Bearer
+   <token>`, matching an entry in `RTK_API_CLIENTS` -> that client's
+   principal, scoped.
+3. `Cf-Access-Jwt-Assertion` header, verified against the Cloudflare Access
+   JWKS (`https://<team>/cdn-cgi/access/certs`) with the configured `aud`
+   -> principal `owner`, unscoped.
+4. `Authorization: Bearer <RTK_API_BEARER_TOKEN>` -> principal `owner`,
+   unscoped.
+
+Anything else is a 401. A principal that authenticates but isn't allowed the
+tool it called gets a **403**.
+
+Order matters: the client token is checked *before* the Cloudflare JWT, so a
+scoped identity always wins over the generic one. An external client behind
+Cloudflare Access presents both -- the Access service-token headers get it
+past the edge, the client token tells this server who it is.
+
+### Clients and scopes
+
+`RTK_API_CLIENTS` is a JSON object mapping a client name to its token and
+scopes. `allow` and `require_approval` are fnmatch patterns over tool names:
+
+```json
+{
+  "instinct": {
+    "token": "<random secret>",
+    "allow": ["things.*", "imessage.chats", "imessage.recent",
+              "imessage.with_contact", "imessage.search", "imessage.unread"],
+    "require_approval": ["imessage.send"]
+  }
+}
+```
+
+Settings are cached at process start, so **editing `RTK_API_CLIENTS` requires a
+restart** to take effect (`launchctl kickstart -k gui/$UID/com.noahbres.rtk-api`
+on rtk).
+
+`GET /v1/tools` is filtered to what the caller may actually call, so a scoped
+client can't discover tools outside its grant. Calls to unknown tools outside
+the grant return 403 rather than 404, for the same reason.
+
+**`require_approval` is not implemented yet.** It is checked *before* `allow`
+and overrides it, so listing a tool there gates it out of a broader grant.
+The intended mechanism is a human-in-the-loop approval queue -- the tool
+returns `202` with an `approval_id`, a dedicated Telegram bot DMs an
+Allow/Deny prompt, and the caller polls for the decision. Until that ships, a
+tool matching `require_approval` is refused with a 403 rather than allowed
+through unattended. See `notes/NOTES.md` for the full design.
+
+**The MCP mount is not scoped.** `_build_mcp_app` registers the entire
+registry and the `/<secret>/` path short-circuits every check above, so
+holding the MCP secret means holding every tool. Per-client scoping applies
+to the REST surface only.
+
+Two credentials that a malformed `RTK_API_CLIENTS` must never break: the
+owner bearer and the Cloudflare JWT. Parsing fails closed (no clients
+loaded, error logged) rather than taking the server down.
 
 ## curl examples
 
@@ -58,6 +117,10 @@ curl -s localhost:8787/health
 curl -s localhost:8787/v1/tools -H "Authorization: Bearer $T" | jq .
 
 curl -s localhost:8787/v1/system/ping -H "Authorization: Bearer $T" -d '{}'
+
+# As a scoped client (see RTK_API_CLIENTS above):
+curl -s localhost:8787/v1/things/list -H "X-Rtk-Client-Token: $INSTINCT_TOKEN" \
+  -H 'content-type: application/json' -d '{"view":"today"}'
 
 curl -s localhost:8787/v1/system/echo -H "Authorization: Bearer $T" \
   -d '{"text": "hello"}'

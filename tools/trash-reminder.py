@@ -264,16 +264,21 @@ def recent_chat_messages(numbers: list[str], since: datetime, limit: int = 200) 
 
 
 def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool:
-    """Confirm our send landed (outbound row in the groupchat matching text)."""
+    """Confirm our send landed (outbound row in the groupchat matching text).
+
+    Outbound group sends often land with text=NULL and the body only in
+    attributedBody, so match against both (same CAST trick as search).
+    """
     import time
 
+    ascii_snippet = re.sub(r"[^\x20-\x7e]", "", text).strip()[:60]
     deadline = time.monotonic() + 5.0
     since_ns = int((since.timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
     while time.monotonic() < deadline:
         conn = _open()
         try:
-            rows = conn.execute(
-                """SELECT DISTINCT m.text as text
+            row = conn.execute(
+                """SELECT 1
                    FROM message m
                    JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
                    JOIN chat c ON c.ROWID = cmj.chat_id
@@ -281,10 +286,12 @@ def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool
                    JOIN handle h ON h.ROWID = chj.handle_id
                    WHERE h.id LIKE :n AND m.is_from_me = 1
                      AND m.date >= :since
-                   ORDER BY m.date DESC LIMIT 20""",
-                {"n": f"%{numbers[0]}%", "since": since_ns},
-            ).fetchall()
-            if any((r["text"] or "").strip() == text.strip() for r in rows):
+                     AND (m.text LIKE :q OR CAST(m.attributedBody AS TEXT) LIKE :q)
+                   LIMIT 1""",
+                {"n": f"%{numbers[0]}%", "since": since_ns,
+                 "q": f"%{ascii_snippet}%"},
+            ).fetchone()
+            if row is not None:
                 return True
         finally:
             conn.close()

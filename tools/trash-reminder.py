@@ -293,7 +293,7 @@ def find_recent_outbound(numbers: list[str], text: str, since: datetime) -> bool
                    JOIN handle h ON h.ROWID = chj.handle_id
                     WHERE h.id LIKE :n AND m.is_from_me = 1
                      AND m.date >= :since
-                     AND (m.text LIKE :q ESCAPE '\' OR CAST(m.attributedBody AS TEXT) LIKE :q ESCAPE '\')
+                     AND (m.text LIKE :q ESCAPE '\\' OR CAST(m.attributedBody AS TEXT) LIKE :q ESCAPE '\\')
                     LIMIT 1""",
                 {"n": f"%{numbers[0]}%", "since": since_ns,
                  "q": f"%{snippet}%", "escape": "\\"},
@@ -450,11 +450,11 @@ def main() -> None:
         )
         text = FINAL_TPL.format(name=display[person], day=day_label,
                                 skipped=skipped_note)
+        sent_at = datetime.now(ZoneInfo("UTC"))  # before send: race-free floor
         status = send_text(text, ordered_numbers, args.dry_run)
         print(f"{today}: final -> {person}: {text} [{status}]")
         if not args.dry_run:
-            confirmed = find_recent_outbound(ordered_numbers, text,
-                                             datetime.now(ZoneInfo("UTC")))
+            confirmed = find_recent_outbound(ordered_numbers, text, sent_at)
             print(f"{today}: outbound {'confirmed' if confirmed else 'UNCONFIRMED'}")
             state["final_for"] = pickup_key
             state["index"] = (pos + 1) % len(ORDER)

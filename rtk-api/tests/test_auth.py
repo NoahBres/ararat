@@ -81,6 +81,71 @@ def test_garbage_jwt_rejected(monkeypatch):
     assert resp.status_code == 401
 
 
+def test_cf_jwt_owner_common_name_grants_owner(monkeypatch):
+    import rtk_api.auth as auth_module
+
+    monkeypatch.setenv("CF_ACCESS_TEAM_DOMAIN", "example.cloudflareaccess.com")
+    monkeypatch.setenv("CF_ACCESS_AUD", "some-aud")
+    monkeypatch.setenv("CF_ACCESS_OWNER_COMMON_NAME", "owner-token.access")
+    monkeypatch.setattr(
+        auth_module,
+        "_verify_cf_access_jwt",
+        lambda token, settings: {"common_name": "owner-token.access"},
+    )
+    client = _client(monkeypatch)
+    resp = client.post(
+        "/v1/system/ping",
+        headers={"Cf-Access-Jwt-Assertion": "irrelevant"},
+    )
+    assert resp.status_code == 200
+
+
+def test_cf_jwt_non_owner_common_name_denied(monkeypatch):
+    """A valid JWT from a *scoped client's own* service token (e.g. instinct's,
+    with no X-Rtk-Client-Token presented) must not fall through to unscoped
+    owner -- that would silently defeat RTK_API_CLIENTS scoping.
+    """
+    import rtk_api.auth as auth_module
+
+    monkeypatch.setenv("CF_ACCESS_TEAM_DOMAIN", "example.cloudflareaccess.com")
+    monkeypatch.setenv("CF_ACCESS_AUD", "some-aud")
+    monkeypatch.setenv("CF_ACCESS_OWNER_COMMON_NAME", "owner-token.access")
+    monkeypatch.setattr(
+        auth_module,
+        "_verify_cf_access_jwt",
+        lambda token, settings: {"common_name": "instinct-token.access"},
+    )
+    client = _client(monkeypatch)
+    resp = client.post(
+        "/v1/system/ping",
+        headers={"Cf-Access-Jwt-Assertion": "irrelevant"},
+    )
+    assert resp.status_code == 401
+
+
+def test_cf_jwt_unconfigured_owner_common_name_denies_everyone(monkeypatch):
+    """If CF_ACCESS_OWNER_COMMON_NAME isn't set, a valid JWT must never grant
+    owner -- fail closed rather than falling back to the old any-JWT-is-owner
+    behavior.
+    """
+    import rtk_api.auth as auth_module
+
+    monkeypatch.setenv("CF_ACCESS_TEAM_DOMAIN", "example.cloudflareaccess.com")
+    monkeypatch.setenv("CF_ACCESS_AUD", "some-aud")
+    monkeypatch.delenv("CF_ACCESS_OWNER_COMMON_NAME", raising=False)
+    monkeypatch.setattr(
+        auth_module,
+        "_verify_cf_access_jwt",
+        lambda token, settings: {"common_name": "anything.access"},
+    )
+    client = _client(monkeypatch)
+    resp = client.post(
+        "/v1/system/ping",
+        headers={"Cf-Access-Jwt-Assertion": "irrelevant"},
+    )
+    assert resp.status_code == 401
+
+
 def test_secret_path_ok(monkeypatch):
     monkeypatch.setenv("RTK_API_BEARER_TOKEN", "test-token")
     monkeypatch.setenv("RTK_API_MCP_SECRET", "s3cret")

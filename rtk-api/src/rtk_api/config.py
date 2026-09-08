@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     rtk_api_mcp_secret: str | None = Field(default=None)
     cf_access_team_domain: str | None = Field(default=None)
     cf_access_aud: str | None = Field(default=None)
+    cf_access_owner_common_name: str | None = Field(default=None)
     things_auth_token: str | None = Field(default=None)
     imessage_write_enabled: bool = Field(default=False)
     imessage_write_allowlist_raw: str = Field(default="", alias="imessage_write_allowlist")

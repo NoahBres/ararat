@@ -13,7 +13,15 @@ A request resolves to a principal via the first of these that matches:
      must: the Access headers get them past the edge, the client token
      tells us who they are).
   3. `Cf-Access-Jwt-Assertion` verifying against the Cloudflare Access JWKS
-     for the configured team domain, with `aud == CF_ACCESS_AUD`.
+     for the configured team domain, with `aud == CF_ACCESS_AUD` *and* the
+     JWT's `common_name` claim (the authenticating service token's client
+     id) matching `CF_ACCESS_OWNER_COMMON_NAME`. A JWT is proof someone
+     passed *some* service token valid for this Access app -- not proof of
+     *which* one -- so without this check any scoped client's Access
+     credentials alone (no X-Rtk-Client-Token) would resolve to unscoped
+     owner, silently defeating RTK_API_CLIENTS. A valid JWT for a
+     non-owner common_name falls through to check 4 rather than granting
+     anything.
   4. `Authorization: Bearer <RTK_API_BEARER_TOKEN>` (constant-time compare).
 
 3 and 4 are the owner: unscoped, all tools. `/health` is always
@@ -102,22 +110,22 @@ class _JWKSCache:
 _jwks_cache = _JWKSCache()
 
 
-def _verify_cf_access_jwt(token: str, settings: Settings) -> bool:
+def _verify_cf_access_jwt(token: str, settings: Settings) -> dict | None:
+    """Verify signature/audience and return the decoded claims, or None."""
     if not settings.cf_access_team_domain or not settings.cf_access_aud:
-        return False
+        return None
     try:
         client = _jwks_cache.get(settings.cf_access_team_domain)
         signing_key = client.get_signing_key_from_jwt(token)
-        jwt.decode(
+        return jwt.decode(
             token,
             signing_key.key,
             algorithms=["RS256", "ES256"],
             audience=settings.cf_access_aud,
         )
-        return True
     except Exception:
         logger.warning("cf-access jwt verification failed", extra={"reason": "invalid_or_expired"})
-        return False
+        return None
 
 
 def _bearer_value(header_value: str | None) -> str | None:
@@ -191,11 +199,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.principal = client_principal
             return await call_next(request)
 
-        # 3. Cloudflare Access JWT.
+        # 3. Cloudflare Access JWT -- owner only if it's *the owner's*
+        # service token that authenticated at the edge. A valid JWT from a
+        # scoped client's own service token (e.g. instinct's) must not grant
+        # owner just because no client token happened to be presented.
         cf_jwt = request.headers.get("Cf-Access-Jwt-Assertion")
-        if cf_jwt and _verify_cf_access_jwt(cf_jwt, settings):
-            request.state.principal = _owner("cf-access")
-            return await call_next(request)
+        if cf_jwt:
+            claims = _verify_cf_access_jwt(cf_jwt, settings)
+            if claims is not None:
+                common_name = claims.get("common_name")
+                if settings.cf_access_owner_common_name and hmac.compare_digest(
+                    common_name or "", settings.cf_access_owner_common_name
+                ):
+                    request.state.principal = _owner("cf-access")
+                    return await call_next(request)
+                logger.warning(
+                    "cf-access jwt valid but common_name is not the owner's",
+                    extra={"common_name": common_name},
+                )
 
         # 4. Static bearer token.
         if _verify_bearer(request.headers.get("Authorization"), settings):

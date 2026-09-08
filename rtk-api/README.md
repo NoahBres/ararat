@@ -2,7 +2,8 @@
 
 Personal API + (optional) MCP server exposing tools -- Things 3 first, more
 later -- to AI agents (Claude Code, scripts, Claude.ai). See
-`../notes/plans/rtk-api.md` for the full design and rollout phases.
+`notes/plan.md` for the full design and rollout phases, and `notes/NOTES.md` for
+the current state of the deployed service (auth, credentials, gotchas).
 
 Phase 1 (this code): REST server with auth, the tool registry, Things read
 tools, and a system smoke-test tool. MCP mounting is best-effort (see
@@ -29,6 +30,7 @@ still take precedence over that file.
 | `RTK_API_MCP_SECRET` | Capability-URL secret; if set, mounts the MCP app at `/<secret>/mcp` and that path prefix bypasses auth | none (MCP mount disabled if unset) |
 | `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com` | none (CF Access auth disabled if unset) |
 | `CF_ACCESS_AUD` | Cloudflare Access application AUD tag | none |
+| `CF_ACCESS_OWNER_COMMON_NAME` | The owner's own Access service token's client id (the `common_name` claim in its JWT, e.g. `2c58...4e7.access`). Required for a Cloudflare JWT to grant unscoped owner -- see [Auth](#auth) | none (no JWT grants owner if unset) |
 | `THINGS_AUTH_TOKEN` | Things URL scheme auth token (needed for write tools in Phase 2) | none |
 | `IMESSAGE_WRITE_ENABLED` | Kill switch for iMessage sends (Phase 3) | `false` |
 | `IMESSAGE_WRITE_ALLOWLIST` | Comma-separated identifiers allowed to receive sends (Phase 3) | empty |
@@ -53,7 +55,8 @@ of these that matches:
    <token>`, matching an entry in `RTK_API_CLIENTS` -> that client's
    principal, scoped.
 3. `Cf-Access-Jwt-Assertion` header, verified against the Cloudflare Access
-   JWKS (`https://<team>/cdn-cgi/access/certs`) with the configured `aud`
+   JWKS (`https://<team>/cdn-cgi/access/certs`) with the configured `aud`,
+   *and* the JWT's `common_name` claim matching `CF_ACCESS_OWNER_COMMON_NAME`
    -> principal `owner`, unscoped.
 4. `Authorization: Bearer <RTK_API_BEARER_TOKEN>` -> principal `owner`,
    unscoped.
@@ -65,6 +68,18 @@ Order matters: the client token is checked *before* the Cloudflare JWT, so a
 scoped identity always wins over the generic one. An external client behind
 Cloudflare Access presents both -- the Access service-token headers get it
 past the edge, the client token tells this server who it is.
+
+**Why the JWT alone isn't enough for owner.** A Cloudflare Access JWT proves
+the caller passed *some* service token valid for this Access app -- not
+*which* one. Every scoped client (e.g. `instinct`) needs its own Access
+service token so it can be revoked independently (see `notes/NOTES.md`), and
+that token's JWT is just as "valid" as the owner's. Without checking
+`common_name`, a scoped client that simply omitted its `X-Rtk-Client-Token`
+would fall through to step 3 and get unscoped owner -- silently defeating
+`RTK_API_CLIENTS`. Checking `common_name` closes that: only the specific
+service token named in `CF_ACCESS_OWNER_COMMON_NAME` can reach owner via the
+JWT path; any other valid JWT falls through to step 4 (probably a 401, since
+external clients don't have the bearer token).
 
 ### Clients and scopes
 
@@ -276,7 +291,7 @@ It also refuses group chats and caps `text` at 2000 characters. It sends via
 arguments -- never interpolated into the AppleScript source. The **first**
 send triggers a macOS Automation permission prompt for Messages.app on the
 server's screen -- approve it via Screen Sharing (see
-`notes/plans/rtk-api.md` section 6.1/6.3). After sending, it polls
+`notes/plan.md` section 6.1/6.3). After sending, it polls
 chat.db for ~3s to confirm the outbound row landed and returns
 `{"sent": "confirmed" | "unconfirmed", "to": ..., "rowid": ...}`.
 

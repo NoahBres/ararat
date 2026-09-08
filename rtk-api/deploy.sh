@@ -5,7 +5,7 @@
 # Run directly on rtk:
 #   ./rtk-api/deploy.sh
 #
-# Run from rnn (SSHes into rtk over the Cloudflare tunnel and runs the same
+# Run from rnn (SSHes into rtk via the `rtk` alias -- LAN/Tailscale first -- and runs the same
 # steps there):
 #   ./rtk-api/deploy.sh --remote
 #
@@ -40,7 +40,7 @@ exit 1
 '
 
 if [[ "$REMOTE" == "true" ]]; then
-  ssh rtk-cloudflare "$remote_cmd"
+  ssh rtk "$remote_cmd"
 else
   eval "$remote_cmd"
 fi

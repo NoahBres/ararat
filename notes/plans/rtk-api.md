@@ -1,6 +1,6 @@
 # Plan: `rtk-api` — personal API + MCP server on the Mac mini (`rtk`)
 
-Status: Written 2026-09-07. **Phases 1–3 implemented 2026-09-08** (code in `rtk-api/`, launchd agent in nix, verified end-to-end on rtk ad hoc). Remaining: Phase 0 manual steps (Cloudflare hostnames + Access, `just switch` on rtk, FDA grant) and optional Phase 4. MCP mount exists but is deprioritized.
+Status: Written 2026-09-07 (as `hometools`, renamed `rtk-api` 2026-09-08). **Phases 0–3 complete and verified 2026-09-08**, including Cloudflare Access and Full Disk Access via the `rtk-api.app` launcher (not in the original plan; see `notes/NOTES.md` → rtk-api). Remaining: Phase 4 / `mcp.noahbres.com`, iMessage send enablement. Current-state reference is `notes/NOTES.md`; this doc is the design rationale.
 Audience: implementing agents (any model). Read the whole doc before starting a phase.
 Owner: Noah. Anything marked **[NOAH]** is a manual step only Noah can do (dashboard clicks, TCC prompts, secrets).
 

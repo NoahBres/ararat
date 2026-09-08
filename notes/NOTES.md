@@ -27,130 +27,178 @@ ssh -o ProxyCommand="cloudflared access ssh --hostname %h" noah@ssh-rtk.noahbres
 
 Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separate Cloudflare Access login/service-token step needed since no Access policy is enforced.
 
-## rtk-api (api.noahbres.com / mcp.noahbres.com)
+## rtk-api (api.noahbres.com)
 
-`rtk-api` is a private, authenticated HTTP surface running on `rtk` that exposes personal
-"tools" (Things 3, iMessage, etc.) to AI agents over REST and MCP. Full design: see
-`notes/plans/rtk-api.md`. Usage/dev docs: `rtk-api/README.md`.
+`rtk-api` is a private, authenticated HTTP API running on `rtk` (the home Mac mini) that exposes
+personal "tools" — Things 3 and iMessage today — to AI agents and scripts. Built 2026-09-08.
+Design doc: `notes/plans/rtk-api.md`. Dev/usage docs: `rtk-api/README.md`. Code: `rtk-api/`.
 
-- **Hostnames**: `api.noahbres.com` (REST, Cloudflare Access service-token auth) and
-  `mcp.noahbres.com` (MCP, capability-URL auth: `https://mcp.noahbres.com/<secret>/mcp`).
-  Both route through the existing `rtk` Cloudflare Tunnel to one local process.
-- **Port**: `127.0.0.1:8787` on `rtk` only — never bound publicly; all ingress is via the tunnel.
-- **Secrets**: `~/.config/rtk-api/env` on `rtk` (`chmod 600`, gitignored, never committed).
-  Holds `RTK_API_BEARER_TOKEN`, `RTK_API_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`,
-  `CF_ACCESS_AUD`, `THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`.
-  Also backed up in 1Password (item `rtk-api`).
-- **launchd**: `com.noahbres.rtk-api`, defined in `nixos-config/hosts/rtk/home.nix`
-  (modelled on `things-today-tracker` / `ararat`). Runs
-  `uv run --frozen rtk-api serve --host 127.0.0.1 --port 8787` from
-  `~/Developer/ararat/rtk-api`, sourcing the secrets file first. Logs: `/tmp/rtk-api.log`,
-  `/tmp/rtk-api-error.log`.
-- **Aliases** (on `rtk`): `restart-rtk-api`, `kill-rtk-api`, `rtk-api-log`.
-- **Deploy**: `rtk-api/deploy.sh` — pulls, `uv sync --frozen`, kicks the launchd agent, polls
-  `/health`. Run directly on `rtk`, or `rtk-api/deploy.sh --remote` from `rnn` (SSHes in via
-  `rtk-cloudflare`). Re-apply the nix config (`just deploy-rtk` from `rnn`, see "Deploying nix config to `rtk`"
-  below) only when `home.nix` itself changes.
-- **Cloudflare state (as of 2026-09-08, evening)**: tunnel `ararat` (id
-  `a1428f1d-04a1-496f-a8f0-18bc7ee54152`, account `b912898d014811a465b4b3bf29ba9c0b`) has ingress
-  `api.noahbres.com -> http://localhost:8787` and a proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`.
-  **Cloudflare Access is enabled** (team `bold-poetry-9de0`, Zero Trust Free). Access app `rtk-api`
-  on `api.noahbres.com` with one policy: Service Auth for service token `rtk-api` (expires
-  2027-09-08). Callers send `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers (1Password:
-  `rtk-api cloudflare access service token`). Unauthenticated and bearer-only requests get 403 at the
-  edge; the server additionally verifies the `Cf-Access-Jwt-Assertion` JWT (`CF_ACCESS_TEAM_DOMAIN`
-  + `CF_ACCESS_AUD` in `~/.config/rtk-api/env`). The bearer token (`rtk-api` in 1Password) still
-  works from localhost / behind the edge. `mcp.noahbres.com` not created yet. Cloudflare API tokens
-  in 1Password: `cloudflare-token-creator`, `cloudflare-rtk-api-token` (expires 2026-10-08).
-- **Status 2026-09-08**: deployed (gen 46), FDA granted to `~/Applications/rtk-api.app`; Things read/write and
-  all iMessage read tools verified end-to-end through `api.noahbres.com`. iMessage send still off.
-- **TCC gotcha**: under launchd, first access to another app's container (Things group container,
-  chat.db, AddressBook) pops macOS's "access data from other apps" prompt on rtk's screen and blocks
-  that call until clicked. `things` is imported lazily and tool calls run in a threadpool so the
-  server still boots and `/health` answers; Things/iMessage calls hang until the prompt is approved
-  or FDA is granted to the python binary (plan §6.1). Approve via Screen Sharing.
-- **Manual Phase 0 steps** (Noah only — see plan §3 for full detail):
-  1. Add `api.noahbres.com` and `mcp.noahbres.com` as public hostnames on the `rtk` Cloudflare
-     Tunnel → `localhost:8787`.
-  2. Put Cloudflare Access (service token) in front of `api.noahbres.com`; note the AUD tag and
-     team domain.
-  3. Do **not** put Access on `mcp.noahbres.com` (Claude.ai can't send custom headers) — add a
-     rate-limit rule there instead.
-  4. Create `~/.config/rtk-api/env` on `rtk` with the variables listed above.
-  5. Grant Full Disk Access to the uv-managed Python (needed for iMessage only) via Screen
-     Sharing on `rtk`.
-  6. If iMessage write is ever enabled, approve the Automation/TCC prompt for Messages.app via
-     Screen Sharing.
+### Architecture in one paragraph
+
+One Python 3.12 process (FastAPI + fastmcp, managed by `uv`) listens on `127.0.0.1:8787` on rtk.
+A tool is a plain function registered with `@tool("things.list")` in `rtk-api/src/rtk_api/tools/`;
+the registry turns it into both a REST route (`POST /v1/things/list`, JSON kwargs in, `{"ok",
+"result"|"error"}` out) and an MCP tool. New tool modules dropped into `tools/` are auto-discovered.
+Write tools are flagged `write=True` and append to `~/.local/state/rtk-api/audit.log`. Tool calls
+run in a threadpool so one blocked call never freezes `/health`. Ingress is the existing
+Cloudflare Tunnel; nothing is bound publicly.
+
+### Calling it
+
+```sh
+curl https://api.noahbres.com/v1/things/list \
+  -H "CF-Access-Client-Id: $ID" -H "CF-Access-Client-Secret: $SECRET" \
+  -H "content-type: application/json" -d '{"view":"today"}'
+curl -H ... https://api.noahbres.com/v1/tools        # registry with JSON schemas
+curl https://api.noahbres.com/health                  # unauthenticated (still needs Access headers at the edge)
+```
+
+Tools (20): `system.{ping,version,echo}`; `things.{list,search,get,projects,areas,tasks_in}` (read),
+`things.{add,update,complete,add_project,batch}` (write, via `things:///` URL scheme; there is no
+delete in the scheme); `imessage.{chats,recent,with_contact,search,unread}` (read, chat.db +
+Contacts name resolution), `imessage.send` (write, **off** unless `IMESSAGE_WRITE_ENABLED=true`
+AND recipient in `IMESSAGE_WRITE_ALLOWLIST`; first real send will pop an Automation prompt for
+Messages.app on rtk's screen).
+
+### Auth (two layers)
+
+1. **Cloudflare Access** at the edge (team `bold-poetry-9de0`, Zero Trust Free). Access app
+   `rtk-api` on `api.noahbres.com`, one policy: Service Auth for service token `rtk-api` (expires
+   2027-09-08). Anything without valid `CF-Access-Client-Id`/`-Secret` headers gets 403 before
+   reaching rtk. Consequence: clients that can't set custom headers (Claude.ai's connector UI)
+   can't use `api.`; that's what the future `mcp.noahbres.com` capability-URL design is for.
+2. **The server itself** accepts a request if the `Cf-Access-Jwt-Assertion` JWT verifies against
+   the team's JWKS with the app's AUD, *or* `Authorization: Bearer $RTK_API_BEARER_TOKEN`
+   (only reachable from localhost now), *or* the path starts with `/$RTK_API_MCP_SECRET/` (MCP,
+   not exposed yet). Failed auth → 401.
+
+### Credentials index (all in 1Password, Private vault)
+
+| Item | What |
+|---|---|
+| `rtk-api` | bearer token + MCP secret (mirror of `~/.config/rtk-api/env` on rtk) |
+| `rtk-api cloudflare access service token` | client id + secret for the Access headers |
+| `cloudflare-rtk-api-token` | scoped Cloudflare API token (Tunnel/Access/DNS/WAF on noahbres.com), expires 2026-10-08 |
+| `cloudflare-token-creator` | Cloudflare token that can mint other tokens |
+| `Things` | Things auth token also lives in `~/Developer/ararat/.env` on rtk |
+
+Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git):
+`RTK_API_BEARER_TOKEN`, `RTK_API_MCP_SECRET`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`,
+`THINGS_AUTH_TOKEN`, `IMESSAGE_WRITE_ENABLED`, `IMESSAGE_WRITE_ALLOWLIST`.
+
+### Cloudflare objects (account `b912898d014811a465b4b3bf29ba9c0b`, zone `1a485d0b081c74cfe34537c498114b55`)
+
+- Tunnel `ararat` (`a1428f1d-04a1-496f-a8f0-18bc7ee54152`), remote-managed by token in
+  `/etc/cloudflared/tunnel-token` on rtk. Ingress: `ssh-rtk.noahbres.com -> ssh://localhost:22`,
+  `api.noahbres.com -> http://localhost:8787`. Public hostnames live in the Zero Trust dashboard /
+  API, not in a local `config.yml`.
+- DNS: proxied CNAME `api` -> `<tunnel-id>.cfargotunnel.com`.
+- Access app `rtk-api` + service token `rtk-api` (above). `ssh-rtk.noahbres.com` still has **no**
+  Access policy (SSH keys are the only guard there).
+- Not created: `mcp.noahbres.com`, WAF rate-limit rules.
+
+### Running on rtk
+
+- launchd agent `com.noahbres.rtk-api` (nix: `nixos-config/hosts/rtk/home.nix`). It runs
+  `~/Applications/rtk-api.app/Contents/MacOS/rtk-api <start-script>`; the start script sources the
+  env file and execs `uv run --frozen rtk-api serve`. Logs `/tmp/rtk-api.log`,
+  `/tmp/rtk-api-error.log`. Aliases on rtk: `restart-rtk-api`, `kill-rtk-api`, `rtk-api-log`.
+- **`rtk-api.app` is a tiny C launcher** (`rtk-api/launcher/`, built once on rtk with
+  `launcher/build.sh`, ad-hoc signed, bundle id `com.noahbres.rtk-api`). It spawns the real command
+  as a child and forwards signals. Purpose: macOS attributes TCC permissions to a launchd job's
+  main executable, so this makes the prompts and the Full Disk Access list say "rtk-api" instead
+  of "python3.12"/"uvx". **Full Disk Access is granted to it** (covers Things' group container,
+  chat.db, AddressBook). Rebuilding the launcher (`--force`) changes its signature and requires
+  re-granting.
+- Python is uv-managed CPython 3.12.13 (`~/.local/share/uv/python/...`), pinned in
+  `rtk-api/.python-version`. Not nix-managed on purpose (nix store paths churn on every rebuild).
+- **Code deploy** (no root, agent-runnable): `rtk-api/deploy.sh --remote` from rnn — pulls,
+  `uv sync --frozen`, kickstarts the agent, polls `/health`. Nix deploy only when `home.nix` changes.
+
+### Gotchas learned
+
+- **TCC prompts block silently under launchd.** First access to another app's container pops
+  "rtk-api would like to access data from other apps" on rtk's screen and the syscall blocks until
+  clicked. `things` is imported lazily and tools run in a threadpool so the server still boots;
+  the affected call just hangs. Approve via Screen Sharing (or FDA covers it).
+- SSH sessions have Full Disk Access implicitly, so "it works over ssh" proves nothing about
+  launchd.
+- `things.search` only returns incomplete items by default.
+- The service-token JWT check needs outbound HTTPS from rtk to
+  `bold-poetry-9de0.cloudflareaccess.com/cdn-cgi/access/certs` (cached after first fetch).
+
+### Not done / future
+
+- `mcp.noahbres.com` for Claude.ai (design in plan §2/§5/§7): same process, capability URL, no
+  Access, plus a Cloudflare rate-limit rule. Code path exists behind `RTK_API_MCP_SECRET`; untested
+  against Claude.ai.
+- iMessage send enablement (flip the two env vars, approve the Automation prompt).
+- Access policy on `ssh-rtk.noahbres.com`.
+- `things-today-tracker` still runs as bare `/usr/bin/python3` and triggers its own "uvx" TCC
+  prompts; could be routed through the same launcher.
 
 ## Deploying nix config to `rtk` (deploy-rs)
 
 `rtk` is headless, so nix changes are pushed from `rnn` with
-[deploy-rs](https://github.com/serokell/deploy-rs) rather than by SSHing in and running
-`darwin-rebuild` there. Set up 2026-09-08. Node config: `deploy.nodes.rtk` in
-`nixos-config/flake.nix`; recipes in `nixos-config/justfile`.
+[deploy-rs](https://github.com/serokell/deploy-rs). Set up 2026-09-08. Node config:
+`deploy.nodes.rtk` in `nixos-config/flake.nix`; recipes in `nixos-config/justfile`.
 
-Why deploy-rs and not `darwin-rebuild --target-host`: nix-darwin has no upstream remote-deploy
-support (PR nix-darwin/nix-darwin#1631 still open). Why not passwordless sudo: Noah doesn't want
-it. deploy-rs is configured with `interactiveSudo = true`, so it prompts for the rtk sudo password
-and never needs a NOPASSWD rule. Consequence: **nix deploys to rtk are human-only** — agents can't
-run them non-interactively. Code deploys for rtk-api don't need root and stay agent-runnable.
+**Why deploy-rs:** nix-darwin has no upstream `--target-host` (PR nix-darwin/nix-darwin#1631 still
+open). **Why interactive sudo:** Noah doesn't want passwordless sudo, so `interactiveSudo = true`
+prompts for rtk's password. Consequence: **nix deploys are human-only**; agents prepare and verify
+(`just build-rtk`, `nix eval`), Noah runs the deploy.
 
-**How it works:** builds the rtk closure locally on `rnn` (`remoteBuild = false`, so the mini
-never compiles anything), `nix copy`s it over the `rtk` SSH alias, activates via `sudo` on rtk,
-then reconnects to confirm. If it can't reconnect within the timeout (e.g. the new config broke
-`cloudflared` or sshd), rtk rolls back to the previous generation by itself ("magic rollback").
-This is the whole point — a bad deploy can't strand the box.
+**How it works:** builds the rtk closure on rnn (`remoteBuild = false`), `nix copy`s it over the
+`rtk` SSH alias, activates via `sudo` on rtk. `autoRollback` is on (revert if activation itself
+errors). **`magicRollback` is OFF** — see gotchas.
 
-The `rtk` SSH alias (`nixos-config/hosts/common/darwin/home.nix`) prefers the Tailscale link
-(`rtk.local`) and falls back to the Cloudflare Access tunnel (`ssh-rtk.noahbres.com`) if
-`rtk.local:22` isn't reachable within 2s — a small `ProxyCommand` script (`rtkSshProxy`) does the
-probe-and-fallback. The old Cloudflare-only alias, `rtk-cloudflare`, is still there if you need to
-force that path.
+**SSH aliases** (`nixos-config/hosts/common/darwin/home.nix`):
+- `rtk` — preferred. ProxyCommand script tries the LAN/Tailscale path (`rtk.local`) first, falls
+  back to the Cloudflare Access tunnel. Uses ControlMaster so deploy-rs's several SSH calls share
+  one connection.
+- `rtk-ts` — pure Tailscale (`rtk.taile4ea05.ts.net`, rtk = 100.83.51.37, rnn = 100.108.87.111).
+- `rtk-cloudflare` — Cloudflare tunnel only (`ssh-rtk.noahbres.com` via `cloudflared access ssh`).
 
-**Commands** (run from `rnn`, inside `nixos-config/`):
+**Commands** (from `rnn`, inside `nixos-config/`):
 
 ```sh
-just deploy-rtk-dry   # build + copy, don't activate — sanity check first
 just build-rtk        # build the exact closure deploy-rtk ships, no sudo (leaves ./result)
-just deploy-rtk       # build, copy, activate (prompts for rtk sudo password), auto-rollback
-just build-deploy-rtk # build-rtk then deploy-rtk, so the build finishes before the sudo prompt
-just switch-rtk       # local-only fallback: run ON rtk, plain darwin-rebuild switch
-just switch           # rnn itself (unchanged)
+just deploy-rtk-dry   # build + copy, don't activate
+just deploy-rtk       # build, copy, activate (prompts for rtk sudo password)
+just build-deploy-rtk # build-rtk then deploy-rtk (build finishes before the password prompt)
+just switch-rtk       # local-only fallback: run ON rtk
+just switch           # rnn itself
 ```
 
-Nix's "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys the working tree.
+The "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys the working tree.
 
 **Workflows:**
-
-- *Change something in `hosts/rtk/home.nix` or shared config* → `just deploy-rtk-dry`, then
-  `just deploy-rtk`. Commit + push afterwards so rtk's own checkout (`~/Developer/ararat`) stays
-  in sync for the rtk-api/ararat `git pull`s.
-- *Change only rtk-api Python code* → `rtk-api/deploy.sh --remote`. No nix involved.
-- *Change both* → deploy-rs first (it installs the launchd plist), then `deploy.sh --remote`.
-- *Bump inputs* → `just update`, `just switch` on rnn, then `just deploy-rtk`. Remember the
-  `cloudflared` daemon on rtk is nix-managed, so this is how it gets upgraded.
-- *Deploy failed / rolled back* → the previous generation is still active; fix the config and
-  redeploy. If SSH is dead anyway, Screen Sharing is the only way in.
-- *deploy-rs CLI itself* comes from nixpkgs (`packages.aarch64-darwin.deploy-rs`), binary-cached,
-  so no Rust build. The activation library comes from the `deploy-rs` flake input; a version
-  mismatch warning between the two is expected and harmless.
+- *nix change for rtk* → `just build-deploy-rtk`, then commit + push so rtk's checkout stays in
+  sync for `git pull`s.
+- *rtk-api Python change only* → `rtk-api/deploy.sh --remote`.
+- *both* → deploy-rs first (installs the plist), then `deploy.sh --remote`.
+- *bump inputs* → `just update`, `just switch` (rnn), `just build-deploy-rtk`. This is how
+  `cloudflared` on rtk gets upgraded.
+- *verify after deploy* → `ssh rtk 'readlink /nix/var/nix/profiles/system; launchctl list | grep noahbres; curl -s localhost:8787/health'`.
 
 **Gotchas:**
-- **Don't deploy over the Cloudflare tunnel.** Learned 2026-09-08: a deploy that changes the
-  `cloudflared` agent's plist makes home-manager restart cloudflared, which drops the tunnel, which
-  kills deploy-rs's SSH session, so it can't confirm and magic rollback reverts the whole deploy
-  (and deletes the generation). Two deploys in a row silently rolled back this way. The `rtk`
-  alias avoids this on the LAN; off-LAN use `rtk-ts` (pure Tailscale, `rtk.taile4ea05.ts.net`)
-  rather than letting it fall back to Cloudflare. **Magic rollback is now disabled** (`magicRollback = false`
-  in flake.nix) because its second sudo'd confirm call kept failing under interactive sudo and
-  reverting good deploys; `autoRollback` (activation-error revert) is still on.
-- The old `switch-rtk` recipe used to SSH to `rtk.local` and run `just switch` in
-  `~/Developer/nixos-config` — that path is the pre-merge standalone checkout on rtk and is stale.
-  The live config is `~/Developer/ararat/nixos-config`. The stale checkout can be deleted.
-- `just deploy-rtk` needs rnn to reach rtk over either Tailscale (`rtk.local`) or the internet
-  (for `cloudflared access ssh` as fallback).
-- Home-manager is integrated as a nix-darwin module, so user-level launchd agents also go through
-  this root-level deploy; there is no sudo-free path for them today.
+- **Magic rollback is disabled.** Its confirm step is a second sudo'd SSH call; under interactive
+  sudo it kept failing and silently reverting good deploys (three times on 2026-09-08 — the box
+  looked "deployed" but was on the old generation, and the failed generations were deleted). Tell
+  is `readlink /nix/var/nix/profiles/system` not advancing. If a deploy ever breaks SSH, Screen
+  Sharing is the way in.
+- **Don't deploy over the Cloudflare tunnel.** A deploy that changes the `cloudflared` plist
+  restarts cloudflared and drops the tunnel mid-deploy. The `rtk` alias avoids this on the LAN;
+  off-LAN use `rtk-ts`.
+- **Login Items shows "sh" for any agent using home-manager's default wrapper** (`/bin/sh -c
+  "wait4path /nix/store && exec ..."`). All four `com.noahbres.*` agents set
+  `waitForNixStore = false`, which swaps in a launcher script named after the agent; safe because
+  user agents start after login, when the store is long mounted. Two remaining "sh" entries are
+  not ours: `org.nixos.activate-system` (nix-darwin) and `systems.determinate.nix-installer.nix-hook`.
+- deploy-rs CLI comes from nixpkgs (binary-cached); the activation lib from the flake input. A
+  version-mismatch warning between them is harmless.
+- The old `~/Developer/nixos-config` checkout on rtk is stale (pre-merge); the live config is
+  `~/Developer/ararat/nixos-config`. The stale one can be deleted.
 
 ## noahbres.com domain / DNS architecture
 

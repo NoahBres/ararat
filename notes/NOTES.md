@@ -49,8 +49,8 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
 - **Aliases** (on `rtk`): `restart-hometools`, `kill-hometools`, `hometools-log`.
 - **Deploy**: `hometools/deploy.sh` — pulls, `uv sync --frozen`, kicks the launchd agent, polls
   `/health`. Run directly on `rtk`, or `hometools/deploy.sh --remote` from `rnn` (SSHes in via
-  `rtk-cloudflare`). Re-apply the nix config (`just switch-rtk` in `nixos-config/`) only when
-  `home.nix` itself changes.
+  `rtk-cloudflare`). Re-apply the nix config (`just deploy-rtk` from `rnn`, see "Deploying nix config to `rtk`"
+  below) only when `home.nix` itself changes.
 - **Manual Phase 0 steps** (Noah only — see plan §3 for full detail):
   1. Add `api.noahbres.com` and `mcp.noahbres.com` as public hostnames on the `rtk` Cloudflare
      Tunnel → `localhost:8787`.
@@ -63,3 +63,85 @@ Uses the standard SSH identity (currently `~/.ssh/id_rsa` on `rnn`) — no separ
      Sharing on `rtk`.
   6. If iMessage write is ever enabled, approve the Automation/TCC prompt for Messages.app via
      Screen Sharing.
+
+## Deploying nix config to `rtk` (deploy-rs)
+
+`rtk` is headless and reachable only through the Cloudflare tunnel, so nix changes are pushed
+from `rnn` with [deploy-rs](https://github.com/serokell/deploy-rs) rather than by SSHing in and
+running `darwin-rebuild` there. Set up 2026-09-08. Node config: `deploy.nodes.rtk` in
+`nixos-config/flake.nix`; recipes in `nixos-config/justfile`.
+
+Why deploy-rs and not `darwin-rebuild --target-host`: nix-darwin has no upstream remote-deploy
+support (PR nix-darwin/nix-darwin#1631 still open). Why not passwordless sudo: Noah doesn't want
+it. deploy-rs is configured with `interactiveSudo = true`, so it prompts for the rtk sudo password
+and never needs a NOPASSWD rule. Consequence: **nix deploys to rtk are human-only** — agents can't
+run them non-interactively. Code deploys for hometools don't need root and stay agent-runnable.
+
+**How it works:** builds the rtk closure locally on `rnn` (`remoteBuild = false`, so the mini
+never compiles anything), `nix copy`s it over the `rtk-cloudflare` SSH alias, activates via
+`sudo` on rtk, then reconnects to confirm. If it can't reconnect within the timeout (e.g. the
+new config broke `cloudflared` or sshd), rtk rolls back to the previous generation by itself
+("magic rollback"). This is the whole point — a bad deploy can't strand the box.
+
+**Commands** (run from `rnn`, inside `nixos-config/`):
+
+```sh
+just deploy-rtk-dry   # build + copy, don't activate — sanity check first
+just deploy-rtk       # build, copy, activate (prompts for rtk sudo password), auto-rollback
+just switch-rtk       # local-only fallback: run ON rtk, plain darwin-rebuild switch
+just switch           # rnn itself (unchanged)
+```
+
+Nix's "Git tree has uncommitted changes" warning is harmless; deploy-rs deploys the working tree.
+
+**Workflows:**
+
+- *Change something in `hosts/rtk/home.nix` or shared config* → `just deploy-rtk-dry`, then
+  `just deploy-rtk`. Commit + push afterwards so rtk's own checkout (`~/Developer/ararat`) stays
+  in sync for the hometools/ararat `git pull`s.
+- *Change only hometools Python code* → `hometools/deploy.sh --remote`. No nix involved.
+- *Change both* → deploy-rs first (it installs the launchd plist), then `deploy.sh --remote`.
+- *Bump inputs* → `just update`, `just switch` on rnn, then `just deploy-rtk`. Remember the
+  `cloudflared` daemon on rtk is nix-managed, so this is how it gets upgraded.
+- *Deploy failed / rolled back* → the previous generation is still active; fix the config and
+  redeploy. If SSH is dead anyway, Screen Sharing is the only way in.
+- *deploy-rs CLI itself* comes from nixpkgs (`packages.aarch64-darwin.deploy-rs`), binary-cached,
+  so no Rust build. The activation library comes from the `deploy-rs` flake input; a version
+  mismatch warning between the two is expected and harmless.
+
+**Gotchas:**
+- The old `switch-rtk` recipe used to SSH to `rtk.local` and run `just switch` in
+  `~/Developer/nixos-config` — that path is the pre-merge standalone checkout on rtk and is stale.
+  The live config is `~/Developer/ararat/nixos-config`. The stale checkout can be deleted.
+- `just deploy-rtk` needs rnn on a network where `cloudflared access ssh` works (any internet).
+- Home-manager is integrated as a nix-darwin module, so user-level launchd agents also go through
+  this root-level deploy; there is no sudo-free path for them today.
+
+## noahbres.com domain / DNS architecture
+
+- **Registrar**: Namecheap. **DNS**: actually delegated to **Cloudflare**
+  (`aldo.ns.cloudflare.com` / `destiny.ns.cloudflare.com`) — Namecheap's own "Advanced DNS" panel
+  is inert for this domain (DNS Type shows "Custom DNS"); all real record edits happen in
+  Cloudflare. Zone ID: `1a485d0b081c74cfe34537c498114b55`.
+- **Site**: hosted on Notion (a page published via Notion Sites), CNAME'd from
+  `www.noahbres.com` -> `external.notion.site`, proxied through Cloudflare.
+  `www.noahbres.com` is the **paid** custom domain slot in Notion (Public pages -> Domains,
+  $96/year). Notion bills **per domain connected**, not per site — adding the bare apex as a
+  second Notion custom domain would be a *second* $96/year charge, and there's no in-place way to
+  rename/swap an existing domain slot (only delete + re-add, which risks a re-charge and site
+  downtime). Decided against both; see below for the free workaround.
+- **Apex (`noahbres.com`, no www)**: as of 2026-09-08, resolves via a free-tier setup instead of a
+  second Notion domain:
+  1. Cloudflare CNAME record `noahbres.com` -> `external.notion.site`, proxied (id
+     `066c515f3eb7bfd69b6940578920225c`). This exists just so Cloudflare's edge sees traffic for
+     the apex (Notion itself 403s the bare domain since only `www` is registered there).
+  2. Cloudflare **Page Rule** (Free plan, 3-rule quota) `noahbres.com/*` -> 301 redirect to
+     `https://www.noahbres.com/$1` (id `926e3397abadd76ce51621fc3f30c74b`). This is what actually
+     makes the apex work — it intercepts before hitting Notion.
+- **API tokens**: two narrowly-scoped Cloudflare tokens were created for this and saved in
+  1Password — "Cloudflare - noahbres.com DNS edit token" and "Cloudflare - noahbres.com Page
+  Rules edit token". The account login item is "Name Cheap" / "Cloudflare" (also in 1Password);
+  logging into either via browser hit a Cloudflare bot-check wall for headless automation, so the
+  working pattern was: open a **headed** agent-browser session, have Noah log in manually, then
+  drive the rest — or mint a scoped API token instead where the surface supports it (much more
+  reliable than fighting the dashboard UI).

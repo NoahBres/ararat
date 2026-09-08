@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Deploy Commands
 
 - **`just switch`** — deploy local macOS (aarch64-darwin) config via `darwin-rebuild switch`
+- **`just deploy-rtk`** — remote deploy to the `rtk` Mac mini via deploy-rs (interactive sudo prompt, magic rollback); `just deploy-rtk-dry` to build+copy only. Human-only — agents can't answer the sudo prompt. Details: `../notes/NOTES.md` → "Deploying nix config to `rtk`"
 - **`just update`** — update flake.lock
 - Cannot run `nixos-rebuild` directly from macOS; always use the Justfile commands
 

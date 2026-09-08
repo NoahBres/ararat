@@ -41,27 +41,54 @@ class ImessageAccessError(RuntimeError):
 # ---- attributedBody decoding (ported from tools/imessage-query.py) --------
 
 _NOISE = {
-    "streamtyped", "NSAttributedString", "NSString", "NSMutableString",
-    "NSColor", "NSFont", "NSObject", "NSMutableDictionary", "NSDictionary",
-    "NSArray", "NSMutableArray", "NSParagraphStyle", "NSMutableParagraphStyle",
-    "NSOriginalFont", "NSUnderline", "NSStrikethrough",
+    "streamtyped",
+    "NSAttributedString",
+    "NSString",
+    "NSMutableString",
+    "NSColor",
+    "NSFont",
+    "NSObject",
+    "NSMutableDictionary",
+    "NSDictionary",
+    "NSArray",
+    "NSMutableArray",
+    "NSParagraphStyle",
+    "NSMutableParagraphStyle",
+    "NSOriginalFont",
+    "NSUnderline",
+    "NSStrikethrough",
 }
 _BPLIST_TAIL = re.compile(r"\s*\[[\da-f]+c\]bplist.*$", re.DOTALL)
 _CLASS_ONLY = re.compile(r"^[A-Z][A-Za-z0-9]+$")
 
 _DATA_DETECTOR_EXTRACTORS = [
-    (re.compile(r"T([\d\+\-\(\) ]{3,})\[PhoneNumber", re.I), lambda m: f"[phone: {m.group(1).strip()}]"),
+    (
+        re.compile(r"T([\d\+\-\(\) ]{3,})\[PhoneNumber", re.I),
+        lambda m: f"[phone: {m.group(1).strip()}]",
+    ),
     (re.compile(r"U([A-Za-z0-9\-]+)TDate"), lambda m: f"[date: {m.group(1)}]"),
     (re.compile(r"(https?://[^\s\x00-\x1f]{8,})"), lambda m: m.group(1)),
     (re.compile(r"at_[0-9a-f_-]+sticker[^\s]*", re.I), lambda m: "[sticker]"),
     (re.compile(r"[A-Za-z]?at_[0-9a-f_\-]{8,}"), lambda m: "[attachment]"),
     (
-        re.compile(r"(\d+\s+\w[\w\s]{2,30}(?:street|st|ave|blvd|dr|rd|ln|way|ct|pl|cir)\b[^,\n]{0,40})", re.I),
+        re.compile(
+            r"(\d+\s+\w[\w\s]{2,30}(?:street|st|ave|blvd|dr|rd|ln|way|ct|pl|cir)\b[^,\n]{0,40})",
+            re.I,
+        ),
         lambda m: m.group(1).strip(),
     ),
 ]
 
-_BINARY_MARKERS = ("Z$class", "WNSValue", "XNSObject", "$null", "bplist", "X$version", "X$archiver", "T$top")
+_BINARY_MARKERS = (
+    "Z$class",
+    "WNSValue",
+    "XNSObject",
+    "$null",
+    "bplist",
+    "X$version",
+    "X$archiver",
+    "T$top",
+)
 
 
 def _clean(s: str) -> str:
@@ -120,6 +147,7 @@ def decode_attributed_body(blob: bytes) -> str:
 
 # ---- timestamps -------------------------------------------------------
 
+
 def apple_ts_to_utc(ns: int) -> datetime:
     return datetime.fromtimestamp(ns / 1e9 + APPLE_EPOCH_OFFSET, tz=UTC)
 
@@ -134,6 +162,7 @@ def _days_cutoff_ns(days: int) -> int:
 
 
 # ---- connection ---------------------------------------------------------
+
 
 def _open(db_path: Path | None = None) -> sqlite3.Connection:
     path = db_path if db_path is not None else DB_PATH
@@ -198,7 +227,9 @@ def _row_to_message(row: sqlite3.Row, attachments_by_msgid: dict[int, list[str]]
     }
 
 
-def _run_message_query(conn: sqlite3.Connection, where_sql: str, params: dict, limit: int) -> list[dict]:
+def _run_message_query(
+    conn: sqlite3.Connection, where_sql: str, params: dict, limit: int
+) -> list[dict]:
     rows = conn.execute(
         f"{_MESSAGE_SELECT} WHERE {where_sql} ORDER BY m.date DESC LIMIT :limit",
         {**params, "limit": limit},
@@ -216,6 +247,7 @@ def _run_message_query(conn: sqlite3.Connection, where_sql: str, params: dict, l
 
 
 # ---- public read API ------------------------------------------------------
+
 
 def list_chats(limit: int = 50) -> list[dict]:
     """Recent chats: guid, display name/participants, last message date."""
@@ -252,7 +284,9 @@ def list_chats(limit: int = 50) -> list[dict]:
                     "chat_name": r["chat_display_name"] or r["chat_identifier"] or r["chat_guid"],
                     "participants": [p["id"] for p in participants],
                     "last_message_date_utc": last_dt.isoformat() if last_dt else None,
-                    "last_message_date_pacific": last_dt.astimezone(PACIFIC).isoformat() if last_dt else None,
+                    "last_message_date_pacific": last_dt.astimezone(PACIFIC).isoformat()
+                    if last_dt
+                    else None,
                 }
             )
         return result
@@ -301,7 +335,9 @@ def search_messages(query: str, days: int = 365, limit: int = 50) -> list[dict]:
     conn = _open()
     try:
         cutoff = _days_cutoff_ns(days)
-        where_sql = "m.date > :cutoff AND (m.text LIKE :q OR CAST(m.attributedBody AS TEXT) LIKE :q)"
+        where_sql = (
+            "m.date > :cutoff AND (m.text LIKE :q OR CAST(m.attributedBody AS TEXT) LIKE :q)"
+        )
         return _run_message_query(conn, where_sql, {"cutoff": cutoff, "q": f"%{query}%"}, limit)
     finally:
         conn.close()
@@ -317,6 +353,7 @@ def unread_messages(limit: int = 50) -> list[dict]:
 
 
 # ---- write-path helpers ----------------------------------------------------
+
 
 def is_group_identifier(identifier: str) -> bool:
     """True if `identifier` is a participant in a group chat (chat.style
@@ -362,7 +399,9 @@ def find_recent_outbound(identifier: str, text: str, since: datetime) -> dict | 
             {"id": identifier, "since_ns": since_ns},
         ).fetchall()
         for r in rows:
-            decoded = (r["text"] or "").strip() or decode_attributed_body(r["attributedBody"] or b"")
+            decoded = (r["text"] or "").strip() or decode_attributed_body(
+                r["attributedBody"] or b""
+            )
             if decoded.strip() == text.strip():
                 return {"rowid": r["rowid"]}
         return None

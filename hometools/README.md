@@ -127,6 +127,7 @@ needs to change. Example:
 # src/hometools/tools/example.py
 from hometools.registry import tool
 
+
 @tool("example.hello", write=False, tags=["example"])
 def hello(name: str) -> dict:
     """Say hello to name."""

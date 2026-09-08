@@ -21,10 +21,28 @@ from datetime import datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote
 
-import things as things_lib
-
 from hometools.config import get_settings
 from hometools.registry import tool
+
+
+class _LazyThings:
+    """Lazy proxy for the `things` library.
+
+    `import things` globs the Things 3 group container at import time, which
+    under launchd triggers macOS's "access data from other apps" TCC prompt and
+    blocks the whole process until someone clicks it. Deferring the import to
+    first use keeps the server bootable (and /health answerable) even when the
+    permission hasn't been granted yet. Tests monkeypatch attributes on this
+    proxy directly, which shadows the delegated lookups.
+    """
+
+    def __getattr__(self, name: str):
+        import things  # noqa: PLC0415 - deliberate lazy import (see docstring)
+
+        return getattr(things, name)
+
+
+things_lib = _LazyThings()
 
 View = Literal["inbox", "today", "upcoming", "anytime", "someday", "logbook"]
 
@@ -209,7 +227,9 @@ def _parse_things_dt(value: Any) -> datetime | None:
         return None
 
 
-def _poll_for_match(fetch, title: str, since: datetime, timeout: float = 3.0, interval: float = 0.25) -> dict | None:
+def _poll_for_match(
+    fetch, title: str, since: datetime, timeout: float = 3.0, interval: float = 0.25
+) -> dict | None:
     """Poll `fetch()` (a callable returning a list of Things dicts) until it
     yields an item with an exact `title` match created at/after `since`
     (with a few seconds of slack for clock/DB skew), or `timeout` elapses.

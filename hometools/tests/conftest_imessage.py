@@ -103,7 +103,16 @@ def build_chat_db(db_path: Path) -> None:
         (1, "m1", "hey are we still on for saturday?", None, 1, 3, 0, 1),
         (2, "m2", "yep see you then", None, None, 3, 1, 1),
         (3, "m3", "unread ping", None, 1, 0.1, 0, 0),
-        (4, "m4", None, b"\x04\x0bstreamtyped\x81\xe8\x03\x84\x01+here is the address 123 Main St", 2, 2, 0, 1),
+        (
+            4,
+            "m4",
+            None,
+            b"\x04\x0bstreamtyped\x81\xe8\x03\x84\x01+here is the address 123 Main St",
+            2,
+            2,
+            0,
+            1,
+        ),
         (5, "m5", "photo incoming", None, 2, 1, 0, 1),
         (6, "m6", "group logistics for the trip", None, 3, 5, 0, 1),
         (7, "m7", "sounds good", None, None, 5, 1, 1),
@@ -111,7 +120,10 @@ def build_chat_db(db_path: Path) -> None:
     conn.executemany(
         "INSERT INTO message (ROWID, guid, text, attributedBody, handle_id, date, is_from_me, is_read) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [(rowid, guid, text, blob, handle, ns(days), from_me, read) for rowid, guid, text, blob, handle, days, from_me, read in messages],
+        [
+            (rowid, guid, text, blob, handle, ns(days), from_me, read)
+            for rowid, guid, text, blob, handle, days, from_me, read in messages
+        ],
     )
 
     conn.executemany(

@@ -22,7 +22,9 @@ def test_build_url_skips_none_values():
 
 
 def test_build_url_encodes_booleans():
-    url = things_tools.build_things_url("update", {"id": "abc", "completed": True, "canceled": False})
+    url = things_tools.build_things_url(
+        "update", {"id": "abc", "completed": True, "canceled": False}
+    )
     assert url == "things:///update?id=abc&completed=true&canceled=false"
 
 
@@ -222,7 +224,9 @@ def test_poll_for_match_finds_recent_item(monkeypatch):
     now = datetime.now()
     item = {"title": "buy milk", "created": now.strftime("%Y-%m-%d %H:%M:%S")}
 
-    result = things_tools._poll_for_match(lambda: [item], "buy milk", now, timeout=1.0, interval=0.01)
+    result = things_tools._poll_for_match(
+        lambda: [item], "buy milk", now, timeout=1.0, interval=0.01
+    )
     assert result == item
 
 
@@ -232,11 +236,15 @@ def test_poll_for_match_ignores_stale_item(monkeypatch):
     now = datetime.now()
     item = {"title": "buy milk", "created": old.strftime("%Y-%m-%d %H:%M:%S")}
 
-    result = things_tools._poll_for_match(lambda: [item], "buy milk", now, timeout=0.05, interval=0.01)
+    result = things_tools._poll_for_match(
+        lambda: [item], "buy milk", now, timeout=0.05, interval=0.01
+    )
     assert result is None
 
 
 def test_poll_for_match_times_out_when_nothing_matches(monkeypatch):
     monkeypatch.setattr(things_tools.time, "sleep", lambda s: None)
-    result = things_tools._poll_for_match(lambda: [], "nope", datetime.now(), timeout=0.05, interval=0.01)
+    result = things_tools._poll_for_match(
+        lambda: [], "nope", datetime.now(), timeout=0.05, interval=0.01
+    )
     assert result is None

@@ -76,7 +76,9 @@ def tool(name: str, *, write: bool = False, tags: list[str] | None = None):
 
     def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
         description = (fn.__doc__ or "").strip()
-        REGISTRY[name] = ToolSpec(name=name, fn=fn, write=write, tags=tags or [], description=description)
+        REGISTRY[name] = ToolSpec(
+            name=name, fn=fn, write=write, tags=tags or [], description=description
+        )
         return fn
 
     return deco

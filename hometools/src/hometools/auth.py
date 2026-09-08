@@ -108,6 +108,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.principal = "bearer"
             return await call_next(request)
 
-        client_ip = request.headers.get("CF-Connecting-IP", request.client.host if request.client else "?")
+        client_ip = request.headers.get(
+            "CF-Connecting-IP", request.client.host if request.client else "?"
+        )
         logger.warning("unauthorized request", extra={"path": path, "ip": client_ip})
         return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)

@@ -18,7 +18,9 @@ import subprocess
 from difflib import SequenceMatcher
 from pathlib import Path
 
-AB_GLOB = str(Path.home() / "Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb")
+AB_GLOB = str(
+    Path.home() / "Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb"
+)
 AB_MAIN = str(Path.home() / "Library/Application Support/AddressBook/AddressBook-v22.abcddb")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -114,7 +116,11 @@ end tell"""
                 name = name.strip()
                 if not name or name == " ":
                     continue
-                key = (name.lower(), value if kind == "phone" else None, value if kind == "email" else None)
+                key = (
+                    name.lower(),
+                    value if kind == "phone" else None,
+                    value if kind == "email" else None,
+                )
                 if key not in seen:
                     seen.add(key)
                     contacts.append(

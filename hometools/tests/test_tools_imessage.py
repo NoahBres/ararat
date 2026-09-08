@@ -43,7 +43,11 @@ def test_recent_tool_enriches_sender_name(chat_db, monkeypatch):
 
 
 def test_with_contact_resolves_via_contacts(chat_db, monkeypatch):
-    monkeypatch.setattr(imessage_tools.contacts, "resolve", lambda q: [{"name": "Kirill", "identifiers": ["+15551234567"]}])
+    monkeypatch.setattr(
+        imessage_tools.contacts,
+        "resolve",
+        lambda q: [{"name": "Kirill", "identifiers": ["+15551234567"]}],
+    )
     result = imessage_tools.with_contact("kirill", days=30)
     texts = {r["text"] for r in result}
     assert "hey are we still on for saturday?" in texts
@@ -99,7 +103,9 @@ def test_send_allowed_calls_osascript_with_argv_and_confirms(monkeypatch):
     monkeypatch.setenv("IMESSAGE_WRITE_ALLOWLIST", "+15551234567")
     monkeypatch.setattr(imessage_tools, "_resolve_send_target", lambda to: "+15551234567")
     monkeypatch.setattr(imessage_tools.imessage_db, "is_group_identifier", lambda ident: False)
-    monkeypatch.setattr(imessage_tools.imessage_db, "find_recent_outbound", lambda *a, **k: {"rowid": 42})
+    monkeypatch.setattr(
+        imessage_tools.imessage_db, "find_recent_outbound", lambda *a, **k: {"rowid": 42}
+    )
 
     captured = {}
 

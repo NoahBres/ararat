@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from hometools import __version__
 
@@ -69,7 +70,9 @@ def _build_mcp_app(settings):
         mcp_asgi_app = mcp.http_app(path="/mcp")
         return mcp_asgi_app, mcp_asgi_app.lifespan
     except Exception:
-        logging.getLogger("hometools").exception("failed to build MCP app; continuing without MCP mount")
+        logging.getLogger("hometools").exception(
+            "failed to build MCP app; continuing without MCP mount"
+        )
         return None, None
 
 
@@ -129,7 +132,9 @@ def create_app() -> FastAPI:
         full_name = f"{tool_name}.{action}"
         spec = REGISTRY.get(full_name)
         if spec is None:
-            return JSONResponse({"ok": False, "error": f"unknown tool {full_name!r}"}, status_code=404)
+            return JSONResponse(
+                {"ok": False, "error": f"unknown tool {full_name!r}"}, status_code=404
+            )
 
         body_bytes = await request.body()
         kwargs: dict[str, Any] = {}
@@ -137,9 +142,13 @@ def create_app() -> FastAPI:
             try:
                 parsed = json.loads(body_bytes)
             except json.JSONDecodeError as exc:
-                return JSONResponse({"ok": False, "error": f"invalid JSON body: {exc}"}, status_code=400)
+                return JSONResponse(
+                    {"ok": False, "error": f"invalid JSON body: {exc}"}, status_code=400
+                )
             if not isinstance(parsed, dict):
-                return JSONResponse({"ok": False, "error": "JSON body must be an object of kwargs"}, status_code=400)
+                return JSONResponse(
+                    {"ok": False, "error": "JSON body must be an object of kwargs"}, status_code=400
+                )
             kwargs = parsed
 
         principal = getattr(request.state, "principal", None)
@@ -148,7 +157,9 @@ def create_app() -> FastAPI:
             audit_log(full_name, principal, kwargs)
 
         try:
-            result = spec.call(kwargs)
+            # Tools are sync and may block on disk / subprocesses / TCC prompts;
+            # run them in the threadpool so the event loop (and /health) stay live.
+            result = await run_in_threadpool(spec.call, kwargs)
         except ValidationError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         except TypeError as exc:

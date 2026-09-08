@@ -102,7 +102,9 @@ def test_messages_with_identifiers_filters_to_contact(chat_db):
 
 
 def test_messages_with_identifiers_keyword_filter(chat_db):
-    rows = imessage_db.messages_with_identifiers(["+15551234567"], days=30, limit=50, keyword="saturday")
+    rows = imessage_db.messages_with_identifiers(
+        ["+15551234567"], days=30, limit=50, keyword="saturday"
+    )
     assert len(rows) == 1
     assert "saturday" in rows[0]["text"]
 

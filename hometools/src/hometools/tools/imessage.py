@@ -67,7 +67,9 @@ def recent(limit: int = 50, days: int = 7) -> list[dict]:
 
 
 @tool("imessage.with_contact")
-def with_contact(contact: str, days: int = 90, limit: int = 50, keyword: str | None = None) -> list[dict]:
+def with_contact(
+    contact: str, days: int = 90, limit: int = 50, keyword: str | None = None
+) -> list[dict]:
     """Messages to/from a contact. `contact` may be a fuzzy name (resolved
     via the same AddressBook/Contacts.app search as tools/contacts-search.py)
     or a phone number/email, optionally filtered by a text `keyword`."""
@@ -77,7 +79,9 @@ def with_contact(contact: str, days: int = 90, limit: int = 50, keyword: str | N
         identifiers.extend(m["identifiers"])
     if not identifiers:
         identifiers = [contact]
-    rows = imessage_db.messages_with_identifiers(identifiers, days=days, limit=limit, keyword=keyword)
+    rows = imessage_db.messages_with_identifiers(
+        identifiers, days=days, limit=limit, keyword=keyword
+    )
     return _enrich_with_sender_names(rows)
 
 
@@ -110,7 +114,9 @@ def send(to: str, text: str) -> dict:
     settings = get_settings()
 
     if not settings.imessage_write_enabled:
-        raise PermissionError("iMessage sending is disabled (set IMESSAGE_WRITE_ENABLED=true to enable)")
+        raise PermissionError(
+            "iMessage sending is disabled (set IMESSAGE_WRITE_ENABLED=true to enable)"
+        )
 
     if len(text) > MAX_SEND_TEXT_LEN:
         raise ValueError(f"text exceeds max length of {MAX_SEND_TEXT_LEN} characters")

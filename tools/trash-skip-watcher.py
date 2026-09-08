@@ -50,7 +50,7 @@ def load_shared():
 
 tr = load_shared()
 
-ACK_OK = "[BOT] Acknowledged. {name} is skipped for {day} pickup."
+ACK_OK = "[BOT] Acknowledged. {name} is skipped for {day} pickup. Next is {next}."
 ACK_DENIED = "[BOT] Only Noah can skip someone else."
 
 
@@ -65,9 +65,11 @@ def resolve_sender(sender, numbers):
     )
 
 
-def decide_acks(messages, numbers, display, day_label, already_acked):
-    """Pure decision step (unit-testable): [(rowid, ack_text)] for new
-    skip commands. Same validity rules as the reminder's parse_skips."""
+def decide_acks(messages, numbers, already_acked):
+    """Pure decision step (unit-testable): [(rowid, kind, person)] for new
+    skip commands. kind is "skip" (valid, person skipped) or "denied"
+    (non-Noah tried to skip someone else). Same validity rules as the
+    reminder's parse_skips."""
     out = []
     seen = set()
     for m in messages:
@@ -85,10 +87,9 @@ def decide_acks(messages, numbers, display, day_label, already_acked):
         if person is None:
             continue  # "bot skip <unknown>" — ignore silently
         if person == sender or sender == "noah":
-            out.append((m["rowid"], ACK_OK.format(name=display[person],
-                                                  day=day_label)))
+            out.append((m["rowid"], "skip", person))
         else:
-            out.append((m["rowid"], ACK_DENIED))
+            out.append((m["rowid"], "denied", person))
     return out
 
 
@@ -125,6 +126,7 @@ def main() -> None:
         return
 
     pickup, days_until = tr.pickup_for_today(today)
+    pickup_key = pickup.isoformat()
     messages = tr.new_messages_with_ids(ordered_numbers, state["last_seen_ns"])
     if messages:
         latest = max(m["date"] for m in messages)
@@ -139,16 +141,42 @@ def main() -> None:
             save_state(args.state, state)
         return
 
+    # Skips banked this week, so "Next is" reflects everything acked so far.
+    # Reset when the pickup rolls over; seeded from this week's acks only.
+    if state.get("skip_week") == pickup_key:
+        week_skips = set(state.get("week_skips", []))
+    else:
+        week_skips = set()
+        state["skip_week"] = pickup_key
+    try:
+        reminder_state = json.loads(
+            (args.state.parent / "state.json").read_text())
+        rotation_index = reminder_state.get("index", 0) % len(tr.ORDER)
+    except (OSError, ValueError, KeyError):
+        rotation_index = None
+
     day_label = pickup.strftime("%A")
-    acks = decide_acks(messages, numbers, display, day_label, acked)
-    for rowid, text in acks:
+    decisions = decide_acks(messages, numbers, acked)
+    for rowid, kind, person in decisions:
+        if kind == "skip":
+            week_skips.add(person)
+            if rotation_index is not None:
+                nxt, _ = tr.resolve_final(rotation_index, week_skips)
+                text = ACK_OK.format(name=display[person], day=day_label,
+                                     next=display[nxt])
+            else:
+                text = ACK_OK.format(name=display[person], day=day_label,
+                                     next="TBD")
+        else:
+            text = ACK_DENIED
         status = tr.send_text(text, ordered_numbers, args.dry_run)
         print(f"{today}: ack rowid={rowid}: {text} [{status}]")
         acked.add(rowid)
-    if not acks:
+    if not decisions:
         print(f"{today}: scanned {len(messages)}, nothing to ack")
     if not args.dry_run:
         state["acked"] = sorted(acked)[-200:]
+        state["week_skips"] = sorted(week_skips)
         save_state(args.state, state)
 
 

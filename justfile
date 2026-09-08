@@ -4,7 +4,9 @@
 # (they use `--flake .#<host>`). Exposing it as a module preserves that: every
 # `just nix <recipe>` runs with nixos-config/ as the working directory.
 #
-#   just nix                 # list the nix-darwin recipes
+#   just --list nix          # list the nix-darwin recipes
+#   just nix                 # CAREFUL: runs the module's DEFAULT recipe
+#                            # (`nix flake update`), it does not list
 #   just nix build-rtk
 #   just nix build-deploy-rtk
 

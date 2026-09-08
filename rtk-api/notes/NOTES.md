@@ -242,3 +242,16 @@ Runtime secrets file on rtk: `~/.config/rtk-api/env` (`chmod 600`, never in git)
   prompts; could be routed through the same launcher.
 - Actually handing instinct its two credentials — scoping is deployed and verified (including the
   `common_name` fix), so this is unblocked, just not yet done.
+
+### Bootstrap discovery: `GET /v1/help` (2026-09-08)
+
+Added so a brand-new agent (instinct, or any future scoped client) can be handed just its two
+credentials and a URL — `https://api.noahbres.com/v1/help` — and self-discover the rest: response
+envelope, how to call a tool, and one section per tool actually in its grant (description + example
+curl), generated fresh per request from the same filter `/v1/tools` uses so the two can't drift.
+Tools outside the caller's `allow` are invisible on both endpoints, same as before. Gated
+(`require_approval`) tools that are otherwise in-grant get their own "Gated" section instead of
+being silently omitted, so an agent understands *why* it can't call them rather than guessing at a
+403. Default is raw `text/markdown`; `Accept: application/json` wraps it in the usual envelope.
+Not yet deployed to rtk — needs `rtk-api/deploy.sh --remote` before instinct (or anyone) can hit it
+live.

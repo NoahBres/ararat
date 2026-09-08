@@ -1,4 +1,4 @@
-"""FastAPI app: /health, /v1/tools, /v1/{tool}/{action}, and (if
+"""FastAPI app: /health, /v1/help, /v1/tools, /v1/{tool}/{action}, and (if
 RTK_API_MCP_SECRET is set) an MCP mount at /{secret}/mcp.
 
 REST is the primary deliverable for Phase 1; the MCP mount is best-effort
@@ -16,7 +16,7 @@ import uuid as uuid_lib
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -25,9 +25,9 @@ from rtk_api import __version__
 # Import side effect: populates rtk_api.registry.REGISTRY.
 from rtk_api import tools as _tools  # noqa: F401
 from rtk_api.audit import audit_log
-from rtk_api.auth import AuthMiddleware
+from rtk_api.auth import AuthMiddleware, Principal
 from rtk_api.config import get_settings
-from rtk_api.registry import REGISTRY
+from rtk_api.registry import REGISTRY, ToolSpec
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -74,6 +74,168 @@ def _build_mcp_app(settings):
             "failed to build MCP app; continuing without MCP mount"
         )
         return None, None
+
+
+def _callable_tools(principal: Principal | None) -> list[ToolSpec]:
+    """Tools this principal may actually invoke right now: unscoped (owner /
+    mcp) sees everything, a scoped client sees only what `allow` grants and
+    `require_approval` doesn't currently block. Shared by /v1/tools and
+    /v1/help so the two surfaces can never drift apart.
+    """
+    return [
+        spec
+        for spec in REGISTRY.values()
+        if principal is None
+        or (principal.permits(spec.name) and not principal.needs_approval(spec.name))
+    ]
+
+
+def _gated_tools(principal: Principal | None) -> list[ToolSpec]:
+    """Tools within this principal's grant that are currently refused pending
+    the approval queue -- worth telling the caller about explicitly rather
+    than letting them discover it as an opaque 403.
+    """
+    if principal is None:
+        return []
+    return [
+        spec
+        for spec in REGISTRY.values()
+        if principal.permits(spec.name) and principal.needs_approval(spec.name)
+    ]
+
+
+def _example_value(schema: dict, name: str) -> Any:
+    kind = schema.get("type")
+    if kind == "string":
+        return f"<{name}>"
+    if kind == "integer":
+        return 0
+    if kind == "number":
+        return 0
+    if kind == "boolean":
+        return True
+    if kind == "array":
+        return []
+    if kind == "object":
+        return {}
+    return f"<{name}>"
+
+
+def _example_body(spec: ToolSpec) -> dict:
+    schema = spec.params_schema()
+    properties = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    return {
+        pname: _example_value(pschema, pname)
+        for pname, pschema in properties.items()
+        if pname in required
+    }
+
+
+def _render_help_markdown(principal: Principal | None, *, base_url: str) -> str:
+    """The bootstrap document: who you are, how to call things, and exactly
+    what you're allowed to call -- scoped to this principal's grant, so a
+    client with a narrow `allow` list never sees tools (or their schemas)
+    outside it. Regenerated per-request from the live registry, so it can
+    never drift out of sync with what /v1/tools or a real call would do.
+    """
+    name = principal.name if principal else "owner"
+    kind = principal.kind if principal else "unscoped"
+    scoped = principal is not None and principal.allow != ("*",)
+
+    lines: list[str] = []
+    lines.append("# rtk-api")
+    lines.append("")
+    lines.append(
+        "Private personal API exposing tools (Things 3, iMessage, ...) over HTTP. "
+        "This document is generated for **you specifically** -- it only lists what "
+        f"principal `{name}` (auth kind: `{kind}`) is currently allowed to call."
+    )
+    lines.append("")
+    lines.append("## Calling a tool")
+    lines.append("")
+    lines.append(
+        "Every tool `foo.bar` is `POST " + base_url + "/v1/foo/bar` with a JSON object "
+        "body of keyword arguments. Every response is one of:"
+    )
+    lines.append("")
+    lines.append("```json")
+    lines.append('{"ok": true, "result": <anything>}')
+    lines.append('{"ok": false, "error": "<message>"}')
+    lines.append("```")
+    lines.append("")
+    lines.append(
+        "Send the same auth headers you used to fetch this document on every call -- "
+        "there is no session, each request is authenticated independently."
+    )
+    lines.append("")
+
+    callable_tools = sorted(_callable_tools(principal), key=lambda s: s.name)
+    gated_tools = sorted(_gated_tools(principal), key=lambda s: s.name)
+
+    if not callable_tools:
+        lines.append(
+            "**You currently have no callable tools.** Either your grant is empty or "
+            "misconfigured -- check with the owner."
+        )
+        lines.append("")
+
+    for spec in callable_tools:
+        route = "/v1/" + spec.name.replace(".", "/")
+        lines.append(f"### `{spec.name}`{'  _(write)_' if spec.write else ''}")
+        lines.append("")
+        if spec.description:
+            lines.append(spec.description)
+            lines.append("")
+        lines.append(f"`POST {base_url}{route}`")
+        lines.append("")
+        lines.append("```sh")
+        lines.append(
+            f"curl -s {base_url}{route} \\\n"
+            '  -H "<your auth headers>" -H "content-type: application/json" \\\n'
+            f"  -d '{json.dumps(_example_body(spec))}'"
+        )
+        lines.append("```")
+        lines.append("")
+
+    if gated_tools:
+        lines.append("## Gated (need approval -- not usable unattended yet)")
+        lines.append("")
+        lines.append(
+            "These are in your grant but currently refused with a 403: they match a "
+            "`require_approval` rule and the human-in-the-loop approval queue isn't "
+            "built yet, so there is no way to get them approved unattended."
+        )
+        lines.append("")
+        for spec in gated_tools:
+            lines.append(f"- `{spec.name}`" + (f" -- {spec.description}" if spec.description else ""))
+        lines.append("")
+
+    lines.append("## Machine-readable schema")
+    lines.append("")
+    lines.append(
+        f"`GET {base_url}/v1/tools` (same auth) returns this same list -- scoped the same "
+        "way -- as JSON with full parameter schemas, if you want to validate arguments "
+        "before calling rather than reading prose."
+    )
+    lines.append("")
+    lines.append(
+        "This document itself is content-negotiated: `Accept: text/markdown` (the "
+        "default) returns this prose; `Accept: application/json` wraps it as "
+        '`{"ok": true, "result": "<this text>"}`.'
+    )
+    lines.append("")
+
+    if scoped:
+        lines.append(
+            "**Scope note:** you are a scoped client. Tools outside your grant are "
+            "invisible here and on `/v1/tools`, and calling one directly returns 403 "
+            "rather than 404 -- so a 403 on an unlisted tool means \"not yours\", not "
+            '"typo".'
+        )
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def create_app() -> FastAPI:
@@ -124,11 +286,18 @@ def create_app() -> FastAPI:
                     "tags": spec.tags,
                     "params_schema": spec.params_schema(),
                 }
-                for spec in REGISTRY.values()
-                if principal is None
-                or (principal.permits(spec.name) and not principal.needs_approval(spec.name))
+                for spec in _callable_tools(principal)
             ],
         }
+
+    @app.get("/v1/help")
+    async def help_doc(request: Request):
+        principal = getattr(request.state, "principal", None)
+        markdown = _render_help_markdown(principal, base_url=str(request.base_url).rstrip("/"))
+        accept = request.headers.get("accept", "")
+        if "application/json" in accept and "text/markdown" not in accept:
+            return JSONResponse({"ok": True, "result": markdown})
+        return PlainTextResponse(markdown, media_type="text/markdown")
 
     @app.post("/v1/{tool_name}/{action}")
     async def call_tool(tool_name: str, action: str, request: Request) -> JSONResponse:

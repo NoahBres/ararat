@@ -105,6 +105,24 @@ on rtk).
 client can't discover tools outside its grant. Calls to unknown tools outside
 the grant return 403 rather than 404, for the same reason.
 
+### Bootstrap discovery for agents (`GET /v1/help`)
+
+An authenticated agent that's never seen this API before can `GET /v1/help`
+(same auth as everything else) and get a **markdown document scoped to its
+own grant**: how to call a tool, the response envelope, and one section per
+tool it may actually invoke right now (description + example curl), plus a
+separate "Gated" section for anything in its grant that's blocked pending the
+approval queue. It's generated fresh from the live registry every request
+via the same filtering `/v1/tools` uses, so the two surfaces can't drift
+apart, and it never lists (or gives schemas for) tools outside the caller's
+`allow`.
+
+Default response is `text/markdown`; send `Accept: application/json` to get
+it wrapped as `{"ok": true, "result": "<markdown>"}` instead. This is the URL
+to hand a new agent as its starting point -- point it at
+`https://api.noahbres.com/v1/help` with its credentials and it can discover
+everything else itself.
+
 **`require_approval` is not implemented yet.** It is checked *before* `allow`
 and overrides it, so listing a tool there gates it out of a broader grant.
 The intended mechanism is a human-in-the-loop approval queue -- the tool

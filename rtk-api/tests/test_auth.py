@@ -233,6 +233,55 @@ def test_owner_bearer_still_sees_everything(monkeypatch):
     assert "imessage.send" in names
 
 
+def test_help_doc_is_markdown_and_scoped_for_client(monkeypatch):
+    client = _client(monkeypatch, clients=INSTINCT)
+    resp = client.get("/v1/help", headers={"X-Rtk-Client-Token": "instinct-token"})
+    assert resp.status_code == 200
+    assert "text/markdown" in resp.headers["content-type"]
+    assert "things.add" in resp.text
+    assert "imessage.search" in resp.text
+    assert not any(f"### `{n}`" in resp.text for n in ("system.ping", "system.echo"))
+    assert "imessage.send" not in resp.text  # not in this fixture's `allow` at all
+
+
+def test_help_doc_lists_gated_tools_separately(monkeypatch):
+    gated_client = {
+        "instinct": {
+            **INSTINCT["instinct"],
+            "allow": [*INSTINCT["instinct"]["allow"], "imessage.send"],
+        }
+    }
+    client = _client(monkeypatch, clients=gated_client)
+    resp = client.get("/v1/help", headers={"X-Rtk-Client-Token": "instinct-token"})
+    assert resp.status_code == 200
+    # in the grant but gated -- listed under "Gated", not as a callable tool
+    assert "### `imessage.send`" not in resp.text
+    assert "imessage.send" in resp.text
+    assert "Gated" in resp.text
+
+
+def test_help_doc_json_negotiation(monkeypatch):
+    client = _client(monkeypatch, clients=INSTINCT)
+    resp = client.get(
+        "/v1/help",
+        headers={"X-Rtk-Client-Token": "instinct-token", "Accept": "application/json"},
+    )
+    assert resp.status_code == 200
+    assert "application/json" in resp.headers["content-type"]
+    body = resp.json()
+    assert body["ok"] is True
+    assert isinstance(body["result"], str)
+    assert "things.add" in body["result"]
+
+
+def test_help_doc_owner_sees_everything(monkeypatch):
+    client = _client(monkeypatch, clients=INSTINCT)
+    resp = client.get("/v1/help", headers={"Authorization": "Bearer test-token"})
+    assert resp.status_code == 200
+    assert "system.ping" in resp.text
+    assert "### `imessage.send`" in resp.text
+
+
 def test_wrong_client_token_rejected(monkeypatch):
     client = _client(monkeypatch, clients=INSTINCT)
     resp = client.post(

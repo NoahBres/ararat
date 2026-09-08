@@ -184,17 +184,18 @@ Read tool rows look like:
 
 ### Full Disk Access (required for all iMessage reads)
 
-Reading chat.db requires Full Disk Access for whatever Python interpreter
-runs the server -- an interactive SSH session gets this for free, but a
-launchd agent's Python binary does not. If a call raises an error mentioning
-Full Disk Access (`ImessageAccessError`), grant it:
+Reading chat.db requires Full Disk Access. An interactive SSH session gets it
+for free, but the launchd agent does not. The agent runs through
+`~/Applications/rtk-api.app` (a tiny launcher, see `launcher/`), so macOS
+attributes permissions to "rtk-api" rather than a generic python binary. If a
+call raises `ImessageAccessError`, grant it once on rtk:
 
-1. Find the exact interpreter path: `cd rtk-api && uv python find 3.12`.
-2. System Settings > Privacy & Security > Full Disk Access > `+` > press
-   `Cmd+Shift+G` and paste that path > enable.
-3. `restart-rtk-api` (the path changes if uv bumps the Python patch
-   version, so pin `.python-version` and don't bump it casually -- re-grant
-   FDA if you do).
+1. System Settings > Privacy & Security > Full Disk Access > `+` > pick
+   `~/Applications/rtk-api.app` > enable.
+2. `restart-rtk-api`.
+
+The grant survives Python/uv upgrades. It only needs redoing if the launcher
+is rebuilt (`launcher/build.sh --force`), since that changes its signature.
 
 Verify: `curl -H "Authorization: Bearer $T" localhost:8787/v1/imessage/recent -d '{}'`
 should return messages, not an FDA error.

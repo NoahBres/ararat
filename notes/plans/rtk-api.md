@@ -200,12 +200,12 @@ Acceptance: from Claude.ai chat, "add 'buy milk' to Things today" creates the ta
 ## 6. Phase 3 — iMessage read (+ gated write)
 
 ### 6.1 Full Disk Access [NOAH, one-time, via Screen Sharing on rtk]
-TCC grants FDA per executable. The server's interpreter is the uv-managed Python from Phase 1, e.g.
-`~/.local/share/uv/python/cpython-3.12.x-macos-aarch64-none/bin/python3.12` (find it with
-`uv python find 3.12` inside `rtk-api/`). System Settings → Privacy & Security → Full Disk Access →
-`+` → press ⌘⇧G and paste that path → enable. Then `restart-rtk-api`. If uv later upgrades the
-patch version, the path changes and FDA must be re-granted — so pin the exact version in
-`.python-version` (e.g. `3.12.8`) and don't bump it casually.
+TCC grants FDA per executable, and for a launchd job it's the job's main executable that counts.
+The agent runs through `~/Applications/rtk-api.app` (built once by `rtk-api/launcher/build.sh`,
+ad-hoc signed, identifier `com.noahbres.rtk-api`), so the grant is to a named app and survives
+Python/uv upgrades. System Settings → Privacy & Security → Full Disk Access → `+` → pick
+`~/Applications/rtk-api.app` → enable. Then `restart-rtk-api`. Re-grant only if the launcher is
+rebuilt. (Original plan granted FDA to the python binary; superseded 2026-09-08.)
 Verification: on rtk, `launchctl kickstart -k gui/$UID/com.noahbres.rtk-api` then
 `curl -H "Authorization: Bearer $T" localhost:8787/v1/imessage/recent -d '{}'` → messages, not "unable to open database".
 

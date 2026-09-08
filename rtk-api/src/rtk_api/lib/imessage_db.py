@@ -26,11 +26,10 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 
 _FDA_HELP = (
     "Could not open/read ~/Library/Messages/chat.db. This almost always means "
-    "Full Disk Access hasn't been granted to the Python interpreter running "
-    "rtk-api. Grant it in System Settings > Privacy & Security > Full Disk "
-    "Access -- add the exact uv-managed python3.12 binary (find it with "
-    "`uv python find 3.12` inside rtk-api/), then restart-rtk-api. See "
-    "notes/plans/rtk-api.md section 6.1 for the full procedure."
+    "Full Disk Access hasn't been granted to rtk-api. Grant it on rtk in "
+    "System Settings > Privacy & Security > Full Disk Access -- add "
+    "~/Applications/rtk-api.app (the launcher the launchd agent runs through), "
+    "then restart-rtk-api. See notes/plans/rtk-api.md section 6.1."
 )
 
 

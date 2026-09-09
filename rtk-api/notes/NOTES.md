@@ -406,3 +406,45 @@ watching over Screen Sharing, since it times back into a denial if unanswered.
 "Not authorized to send Apple events" now raises `PermissionError` carrying the exact remediation
 steps, surfaced to the caller as a 403 — instead of a 15-second wait ending in an opaque
 `{"error": "internal error"}`. Applied to `imessage.send` as well, which has the same path.
+
+### Root cause: rtk is running a stale generation without the TCC launcher (2026-09-09)
+
+After Noah granted Automation (`auth_value=2` at 01:57:28 local), the next send **still** hung 15s
+and TCC flipped the entry straight back to `0` at 01:59:59. An existing allow does not re-prompt —
+unless macOS can't match the grant to the requesting process.
+
+It can't, because **the launcher isn't in the loop on rtk.** The live plist is:
+
+```
+ProgramArguments = ["/nix/store/d1irh9…-rtk-api/bin/rtk-api"]
+```
+
+while `nixos-config/hosts/rtk/home.nix` (committed, `nix eval` verified) produces:
+
+```
+/Users/noah/Applications/rtk-api.app/Contents/MacOS/rtk-api
+/nix/store/0cjgm6…-rtk-api-start
+```
+
+`~/Library/LaunchAgents/com.noahbres.rtk-api.plist` is dated Sep 8 01:24 — rtk is on an older
+home-manager generation, from before the launcher was wired in. So the service runs the venv
+python directly. `AssociatedBundleIdentifiers` is enough to *label* the job (Login Items, and the
+bundle-id row TCC creates), but it does not make an unsigned python the responsible process, so the
+grant never sticks and every send re-prompts into a timeout.
+
+`rtk-api.app` itself is fine — built, ad-hoc signed, "satisfies its Designated Requirement",
+smoke-tested on rtk. It is simply not being used.
+
+**Fix: deploy.** Needs Noah's sudo (`just build-deploy-rtk`), then:
+
+1. `tccutil reset AppleEvents com.noahbres.rtk-api` — clears the recorded denial.
+2. Trigger one send while watching rtk over Screen Sharing, click Allow.
+3. Confirm `readlink /nix/var/nix/profiles/system` advanced past `system-50-link` (silent rollbacks
+   have happened before).
+
+Worth re-checking FDA after the switch: reads work today under the current attribution, and the
+responsible process is changing.
+
+**Generalisable:** `AssociatedBundleIdentifiers` is cosmetic for TCC purposes. Only the actual
+`ProgramArguments[0]` binary establishes the responsible process — and a committed nix config
+proves nothing about a host until the generation is deployed.

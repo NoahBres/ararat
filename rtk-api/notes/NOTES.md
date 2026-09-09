@@ -407,7 +407,7 @@ watching over Screen Sharing, since it times back into a denial if unanswered.
 steps, surfaced to the caller as a 403 — instead of a 15-second wait ending in an opaque
 `{"error": "internal error"}`. Applied to `imessage.send` as well, which has the same path.
 
-### Root cause: rtk is running a stale generation without the TCC launcher (2026-09-09)
+### ~~Root cause: rtk is running a stale generation without the TCC launcher~~ — WRONG, see below (2026-09-09)
 
 After Noah granted Automation (`auth_value=2` at 01:57:28 local), the next send **still** hung 15s
 and TCC flipped the entry straight back to `0` at 01:59:59. An existing allow does not re-prompt —
@@ -448,3 +448,36 @@ responsible process is changing.
 **Generalisable:** `AssociatedBundleIdentifiers` is cosmetic for TCC purposes. Only the actual
 `ProgramArguments[0]` binary establishes the responsible process — and a committed nix config
 proves nothing about a host until the generation is deployed.
+
+### Correction: the launcher was wired in correctly all along (2026-09-09)
+
+The section above is wrong. It read the live plist's `ProgramArguments[0]` —
+`/nix/store/d1irh9…-rtk-api/bin/rtk-api` — as "the nix start script, no launcher". That path is a
+**two-line wrapper script**, and its contents were never checked:
+
+```sh
+#!/bin/sh
+exec /Users/noah/Applications/rtk-api.app/Contents/MacOS/rtk-api /nix/store/0cjgm6…-rtk-api-start
+```
+
+It execs the launcher. The live process tree confirms it — `pid 1002` is
+`~/Applications/rtk-api.app/Contents/MacOS/rtk-api`, parented directly to launchd, with uv and
+python as its descendants. The launcher *is* the responsible process, and has been since
+`90204cf` (Sep 8 01:05). The plist's Sep 8 01:24 mtime and its reference to the same
+`0cjgm6…-rtk-api-start` that `nix eval` produces today both say the deployed config was already
+current; the Sep 9 deploy was a no-op for this agent.
+
+**Lesson: a nix store path in a plist is not self-describing.** `bin/rtk-api` inside a package
+called `rtk-api` looked like the service itself; it was a wrapper around the launcher. `cat` the
+path before concluding anything from its name.
+
+**The actual remaining problem is how the grant was made.** Toggling rtk-api on in System Settings
+> Privacy & Security > Automation set `auth_value=2` for the bundle-id row, but the next send still
+re-prompted and timed back out into a denial — the entry TCC had didn't match the process actually
+asking. Answering the *live prompt* records the entry against the requesting process's own code
+identity, which the toggle can't do. That prompt has never been answered: the first two attempts
+timed out unattended, and every attempt since hit the stale denial.
+
+So the remaining step is unchanged from the start, just for a different reason than the section
+above claimed: with the entry now reset, trigger one send **while watching rtk over Screen
+Sharing** and click Allow.

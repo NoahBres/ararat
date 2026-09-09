@@ -265,3 +265,53 @@ returns exactly its grant (`things.*` + the five iMessage reads, no `imessage.se
 `system.*`). Remaining step for instinct itself: point it at `https://api.noahbres.com/v1/help`
 with its two credentials as its starting point (its own dedicated Cloudflare Access service token,
 plus its `X-Rtk-Client-Token` — both in 1Password, see the credentials table above).
+
+### Fairbridge group-chat tools (2026-09-09)
+
+`fairbridge.info` / `fairbridge.read` / `fairbridge.send` — one iMessage group chat (Daniel Yim,
+Andrew Motz, Niranjan Sahi), exposed to instinct so it can read and post there unattended.
+Added rather than widening `imessage.send`, which is the wrong shape for this: it refuses group
+chats, its allowlist is per-handle, and it's gated behind the approval queue that doesn't exist.
+
+**The scoping is structural.** `fairbridge.send` takes `text` and no recipient; `fairbridge.read`
+takes no chat selector. There is no argument an agent can pass to reach a different conversation —
+the destination is `FAIRBRIDGE_PARTICIPANTS` in rtk's env file, outside the request.
+
+**Chats are addressed by participant set, never by guid.** Modern iMessage group-chat guids are
+*device-local* — verified 2026-09-09, the same three-person chat is `any;+;98f4406b…` on Noah's
+laptop (289 msgs) and `any;+;47ca19e8…` on rtk (291 msgs). A guid
+hardcoded from either machine would resolve to nothing on the other. `find_chat_by_participants`
+requires an exact set match in both directions: chat.db holds near-miss groups with the same three
+people plus a fourth, and those are genuinely different conversations. Among duplicate rows for the
+same chat, most-recently-active wins.
+
+**Name collision worth remembering.** The chat *displaying* as "Fairbridge " is a different group —
+Andrew, Niranjan, and a fourth number not in Noah's contacts, with Daniel Yim absent
+(1623 msgs on rtk). Noah confirmed
+2026-09-09 that "fairbridge" here means the three people he named, not the similarly-named chat.
+The targeted chat has no display name, which is why `fairbridge.info` reports its guid as the name.
+
+**AppleScript gotcha.** Messages parses `text chat id "..."` as `text of (chat id "...")` and fails
+with `-1728`; the bare `chat id "..."` form works. Guid and text go through `on run argv`, never
+interpolated into the script. Confirmation polls chat.db scoped to the chat guid — the 1:1
+`find_recent_outbound` joins through a single handle and can't see a group send.
+
+**Automation TCC is already granted on rtk** (verified 2026-09-09 by enumerating `text chats` over
+SSH — it returned data, not a permission error), so the first send won't block on a GUI prompt.
+
+`FAIRBRIDGE_PARTICIPANTS` has no default in code on purpose — three real phone numbers, public
+repo. It lives only in `~/.config/rtk-api/env` on rtk. Unset, the tools refuse.
+
+Incidental refactor: `_enrich_with_sender_names`, duplicated between the two tool modules, is now
+`contacts.annotate_senders`.
+
+**Confirmation-timestamp bug, found and fixed 2026-09-09.** Both send tools captured
+`sent_at = datetime.now(UTC)` *after* `subprocess.run` returned. Messages writes the chat.db row
+*during* the osascript call, so that timestamp sits past the row's own date and the
+`m.date >= since_ns` filter excluded the very message being confirmed — every successful send would
+have polled for 3s and reported `"unconfirmed"`. Fixed in both `imessage.send` and
+`fairbridge.send` by capturing `sent_at` before the send. This had never surfaced because
+`imessage.send` has never run for real (`IMESSAGE_WRITE_ENABLED=false` since it shipped) —
+`fairbridge.send` is the **first real send this codebase has ever done**. Regression test
+(`test_send_confirms_via_the_real_chat_db_query`) inserts the row mid-call against the real sqlite
+query rather than stubbing the lookup, and was verified to fail against the old ordering.

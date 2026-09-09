@@ -406,3 +406,147 @@ def find_recent_outbound(identifier: str, text: str, since: datetime) -> dict | 
         return None
     finally:
         conn.close()
+
+
+# ---- group-chat identity ---------------------------------------------------
+
+
+def _normalize_handle(value: str) -> str:
+    """Same normalisation `contacts.normalize_identifier` applies, inlined so
+    this module stays free of a dependency on the AddressBook layer: lowercase
+    emails, digits-and-leading-plus for phone numbers."""
+    value = value.strip()
+    if "@" in value:
+        return value.lower()
+    return re.sub(r"[^\d+]", "", value)
+
+
+def find_chat_by_participants(identifiers: list[str]) -> dict | None:
+    """The group chat whose participant set is *exactly* `identifiers`.
+
+    Chats are addressed by participants rather than by guid on purpose:
+    modern iMessage group-chat guids are **device-local**. The same group
+    chat has one guid on Noah's laptop and an entirely different one on rtk,
+    so a guid hardcoded from one machine resolves to nothing on the other --
+    or, worse, to a different chat.
+    A participant set is the same everywhere.
+
+    The match is exact in both directions. A superset chat (the same three
+    people plus a fourth) is a genuinely different conversation and must not
+    match; chat.db has several such near-misses. Among chats that do match
+    exactly -- Messages accumulates duplicate rows for a chat over time --
+    the most recently active one wins, since that's the one Messages.app is
+    actually delivering to.
+
+    Returns None when nothing matches.
+    """
+    want = {_normalize_handle(i) for i in identifiers if i.strip()}
+    if not want:
+        return None
+
+    conn = _open()
+    try:
+        rows = conn.execute(
+            """
+            SELECT c.ROWID as chat_rowid, c.guid as chat_guid,
+                   c.chat_identifier as chat_identifier,
+                   c.display_name as chat_display_name,
+                   (SELECT MAX(m.date) FROM chat_message_join cmj
+                      JOIN message m ON m.ROWID = cmj.message_id
+                     WHERE cmj.chat_id = c.ROWID) as last_date,
+                   (SELECT COUNT(*) FROM chat_message_join cmj
+                     WHERE cmj.chat_id = c.ROWID) as message_count
+            FROM chat c
+            WHERE c.style = 43
+            """
+        ).fetchall()
+
+        best: dict | None = None
+        for r in rows:
+            participants = [
+                p["id"]
+                for p in conn.execute(
+                    """
+                    SELECT h.id as id FROM chat_handle_join chj
+                    JOIN handle h ON h.ROWID = chj.handle_id
+                    WHERE chj.chat_id = :chat_id
+                    """,
+                    {"chat_id": r["chat_rowid"]},
+                ).fetchall()
+            ]
+            if {_normalize_handle(p) for p in participants} != want:
+                continue
+            last_dt = apple_ts_to_utc(r["last_date"]) if r["last_date"] is not None else None
+            candidate = {
+                "chat_guid": r["chat_guid"],
+                "chat_identifier": r["chat_identifier"],
+                "chat_name": r["chat_display_name"] or r["chat_identifier"] or r["chat_guid"],
+                "participants": sorted(participants),
+                "message_count": r["message_count"],
+                "last_message_date_utc": last_dt.isoformat() if last_dt else None,
+                "last_message_date_pacific": last_dt.astimezone(PACIFIC).isoformat()
+                if last_dt
+                else None,
+                "_last_date": r["last_date"] or 0,
+            }
+            if best is None or candidate["_last_date"] > best["_last_date"]:
+                best = candidate
+
+        if best is not None:
+            best.pop("_last_date")
+        return best
+    finally:
+        conn.close()
+
+
+def messages_in_chat(chat_guid: str, days: int = 30, limit: int = 50) -> list[dict]:
+    """Messages in one specific chat, matched on the exact guid.
+
+    Deliberately not built on `messages_with_identifiers`: that one does a
+    `LIKE %ident%` against `h.id OR c.chat_identifier`, so asking for a
+    group's members would sweep in every other chat any of them appear in.
+    """
+    conn = _open()
+    try:
+        cutoff = _days_cutoff_ns(days)
+        return _run_message_query(
+            conn,
+            "m.date > :cutoff AND c.guid = :guid",
+            {"cutoff": cutoff, "guid": chat_guid},
+            limit,
+        )
+    finally:
+        conn.close()
+
+
+def find_recent_outbound_in_chat(chat_guid: str, text: str, since: datetime) -> dict | None:
+    """Confirm an outbound message landed in a specific chat.
+
+    The 1:1 `find_recent_outbound` joins through `chat_handle_join` on a
+    single handle, which can't identify a group send; this scopes to the
+    chat itself.
+    """
+    conn = _open()
+    try:
+        since_ns = _dt_to_apple_ns(since)
+        rows = conn.execute(
+            """
+            SELECT m.ROWID as rowid, m.text as text, m.attributedBody as attributedBody
+            FROM message m
+            JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            JOIN chat c ON c.ROWID = cmj.chat_id
+            WHERE c.guid = :guid AND m.is_from_me = 1 AND m.date >= :since_ns
+            ORDER BY m.date DESC
+            LIMIT 20
+            """,
+            {"guid": chat_guid, "since_ns": since_ns},
+        ).fetchall()
+        for r in rows:
+            decoded = (r["text"] or "").strip() or decode_attributed_body(
+                r["attributedBody"] or b""
+            )
+            if decoded.strip() == text.strip():
+                return {"rowid": r["rowid"]}
+        return None
+    finally:
+        conn.close()

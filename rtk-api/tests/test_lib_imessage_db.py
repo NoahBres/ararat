@@ -49,7 +49,8 @@ def test_recent_messages_newest_first(chat_db):
     rows = imessage_db.recent_messages(limit=50, days=30)
     dates = [r["date_utc"] for r in rows]
     assert dates == sorted(dates, reverse=True)
-    assert len(rows) == 7
+    # every fixture message except m8, which is 400 days old
+    assert len(rows) == 10
 
 
 def test_recent_messages_days_filter_excludes_old(chat_db):

@@ -26,7 +26,14 @@ def no_contacts(monkeypatch):
 
 def test_chats_tool(chat_db, no_contacts):
     result = imessage_tools.chats(limit=50)
-    assert {c["chat_id"] for c in result} == {"chat-guid-100", "chat-guid-101", "chat-guid-102"}
+    assert {c["chat_id"] for c in result} == {
+        "chat-guid-100",
+        "chat-guid-101",
+        "chat-guid-102",
+        "chat-guid-103-stale",
+        "chat-guid-104",
+        "chat-guid-105-superset",
+    }
 
 
 def test_recent_tool_enriches_sender_name(chat_db, monkeypatch):

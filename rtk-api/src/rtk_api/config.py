@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     things_auth_token: str | None = Field(default=None)
     imessage_write_enabled: bool = Field(default=False)
     imessage_write_allowlist_raw: str = Field(default="", alias="imessage_write_allowlist")
+    fairbridge_write_enabled: bool = Field(default=False)
+    fairbridge_participants_raw: str = Field(default="", alias="fairbridge_participants")
     rtk_api_host: str = Field(default="127.0.0.1")
     rtk_api_port: int = Field(default=8787)
 
@@ -110,6 +112,19 @@ class Settings(BaseSettings):
     @property
     def imessage_write_allowlist(self) -> list[str]:
         raw = self.imessage_write_allowlist_raw
+        if not raw:
+            return []
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @property
+    def fairbridge_participants(self) -> list[str]:
+        """Phone numbers/emails of the Fairbridge group chat's members, comma
+        separated. Deliberately **not** defaulted in code: these are three real
+        people's phone numbers, and this repo is on GitHub. Set it in
+        ~/.config/rtk-api/env (gitignored, rtk-local) -- with it unset the
+        fairbridge tools refuse rather than guessing at a chat.
+        """
+        raw = self.fairbridge_participants_raw
         if not raw:
             return []
         return [item.strip() for item in raw.split(",") if item.strip()]

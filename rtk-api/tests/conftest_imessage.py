@@ -64,6 +64,11 @@ def build_chat_db(db_path: Path) -> None:
     - handle 1: +15551234567 ("Kirill"-ish contact, 1:1 chat 100)
     - handle 2: friend@example.com (1:1 chat 101)
     - handle 3 + 4: group chat 102 (style=43)
+    - handles 5/6/7: the "fairbridge" three-person group, present twice --
+      chat 103 (stale duplicate) and chat 104 (recently active), so tests can
+      check that the most recent duplicate wins -- plus chat 105, the same
+      three people *plus* handle 8, a near-miss superset that must never
+      match an exact-participant lookup.
     - a handful of messages, one with an attachment, one unread, one
       with attributedBody-only text, all recent (within a few days).
     """
@@ -82,6 +87,10 @@ def build_chat_db(db_path: Path) -> None:
             (2, "friend@example.com"),
             (3, "+15559990001"),
             (4, "+15559990002"),
+            (5, "+15558880001"),
+            (6, "+15558880002"),
+            (7, "+15558880003"),
+            (8, "+15558880004"),
         ],
     )
 
@@ -91,11 +100,29 @@ def build_chat_db(db_path: Path) -> None:
             (100, "chat-guid-100", None, "+15551234567", 45),
             (101, "chat-guid-101", None, "friend@example.com", 45),
             (102, "chat-guid-102", "Weekend Trip", "chat123456789", 43),
+            (103, "chat-guid-103-stale", None, "chatstale", 43),
+            (104, "chat-guid-104", "Fairbridge", "chatfairbridge", 43),
+            (105, "chat-guid-105-superset", None, "chatsuperset", 43),
         ],
     )
     conn.executemany(
         "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)",
-        [(100, 1), (101, 2), (102, 3), (102, 4)],
+        [
+            (100, 1),
+            (101, 2),
+            (102, 3),
+            (102, 4),
+            (103, 5),
+            (103, 6),
+            (103, 7),
+            (104, 5),
+            (104, 6),
+            (104, 7),
+            (105, 5),
+            (105, 6),
+            (105, 7),
+            (105, 8),
+        ],
     )
 
     messages = [
@@ -116,6 +143,10 @@ def build_chat_db(db_path: Path) -> None:
         (5, "m5", "photo incoming", None, 2, 1, 0, 1),
         (6, "m6", "group logistics for the trip", None, 3, 5, 0, 1),
         (7, "m7", "sounds good", None, None, 5, 1, 1),
+        (8, "m8", "old fairbridge chat", None, 5, 400, 0, 1),
+        (9, "m9", "whose turn to take out the trash", None, 6, 2, 0, 1),
+        (10, "m10", "mine, on it", None, None, 1, 1, 1),
+        (11, "m11", "superset chat, not fairbridge", None, 8, 1, 0, 1),
     ]
     conn.executemany(
         "INSERT INTO message (ROWID, guid, text, attributedBody, handle_id, date, is_from_me, is_read) "
@@ -128,7 +159,19 @@ def build_chat_db(db_path: Path) -> None:
 
     conn.executemany(
         "INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)",
-        [(100, 1), (100, 2), (100, 3), (101, 4), (101, 5), (102, 6), (102, 7)],
+        [
+            (100, 1),
+            (100, 2),
+            (100, 3),
+            (101, 4),
+            (101, 5),
+            (102, 6),
+            (102, 7),
+            (103, 8),
+            (104, 9),
+            (104, 10),
+            (105, 11),
+        ],
     )
 
     conn.execute("INSERT INTO attachment (ROWID, mime_type) VALUES (1, 'image/jpeg')")

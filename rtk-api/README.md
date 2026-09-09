@@ -34,6 +34,8 @@ still take precedence over that file.
 | `THINGS_AUTH_TOKEN` | Things URL scheme auth token (needed for write tools in Phase 2) | none |
 | `IMESSAGE_WRITE_ENABLED` | Kill switch for iMessage sends (Phase 3) | `false` |
 | `IMESSAGE_WRITE_ALLOWLIST` | Comma-separated identifiers allowed to receive sends (Phase 3) | empty |
+| `FAIRBRIDGE_PARTICIPANTS` | Comma-separated identifiers of the Fairbridge group chat's members; the `fairbridge.*` tools resolve their chat from this (see [Fairbridge](#fairbridge-one-group-chat)) | empty (tools refuse) |
+| `FAIRBRIDGE_WRITE_ENABLED` | Kill switch for `fairbridge.send`, independent of `IMESSAGE_WRITE_ENABLED` | `false` |
 | `RTK_API_HOST` | Bind host | `127.0.0.1` |
 | `RTK_API_PORT` | Bind port | `8787` |
 
@@ -91,7 +93,8 @@ scopes. `allow` and `require_approval` are fnmatch patterns over tool names:
   "instinct": {
     "token": "<random secret>",
     "allow": ["things.*", "imessage.chats", "imessage.recent",
-              "imessage.with_contact", "imessage.search", "imessage.unread"],
+              "imessage.with_contact", "imessage.search", "imessage.unread",
+              "fairbridge.info", "fairbridge.read", "fairbridge.send"],
     "require_approval": ["imessage.send"]
   }
 }
@@ -340,6 +343,68 @@ curl -s localhost:8787/v1/imessage/unread -H "Authorization: Bearer $T" -d '{}'
 # `to` must be a phone/email, never a contact name
 curl -s localhost:8787/v1/imessage/send -H "Authorization: Bearer $T" \
   -d '{"to": "+15551234567", "text": "running late, be there in 10"}'
+```
+
+## Fairbridge (one group chat)
+
+`fairbridge.read` / `fairbridge.send` / `fairbridge.info` expose exactly one
+iMessage group chat and nothing else. They exist because `imessage.send` is
+the wrong shape for "let the agent text this one group": it can reach any
+allowlisted handle, it refuses group chats outright, and it's gated behind
+the (unbuilt) approval queue.
+
+The scoping is structural, not just a policy check: **`fairbridge.send` takes
+a `text` and no recipient**. There is no parameter an agent could pass to
+redirect a message somewhere else -- the destination lives in rtk's env file,
+not in the request. `fairbridge.read` is the same in reverse: no chat
+selector, so it can only ever return that one conversation.
+
+### How the chat is identified
+
+By **participant set**, resolved fresh from chat.db on every call --
+deliberately not by guid. Modern iMessage group-chat guids are *device-local*:
+the same group chat has different guids on Noah's laptop and on rtk, so a
+guid copied from one machine resolves to
+nothing on the other. A participant set is the same everywhere.
+
+Set `FAIRBRIDGE_PARTICIPANTS` to the members' phone numbers/emails, comma
+separated. Matching is exact in both directions after normalisation: a chat
+with those people *plus one more* is a different conversation and will not
+match (chat.db accumulates such near-misses). Where Messages has kept several
+duplicate rows for the same chat, the most recently active one wins.
+
+`FAIRBRIDGE_PARTICIPANTS` has **no default in the code** -- it's real people's
+phone numbers and this repo is public. Unset, the tools refuse rather than
+guessing at a chat. Use `fairbridge.info` to confirm what they're pointed at.
+
+### Sending
+
+`fairbridge.send` refuses unless `FAIRBRIDGE_WRITE_ENABLED=true` (its own kill
+switch, independent of `IMESSAGE_WRITE_ENABLED`), rejects empty text, and caps
+`text` at 2000 characters.
+
+It sends via `osascript` with `on run argv`, so the chat guid and the text are
+passed as arguments and never interpolated into the AppleScript source. Note
+the script uses the bare `chat id "..."` form: Messages' dictionary parses
+`text chat id "..."` as `text of (chat id "...")` and fails with `-1728`.
+Afterwards it polls chat.db for ~3s scoped to that chat -- the 1:1
+`find_recent_outbound` joins through a single handle and can't confirm a group
+send -- and returns `{"sent": "confirmed" | "unconfirmed", ...}`.
+
+Sending needs macOS Automation permission for Messages.app for whatever runs
+the process. Already granted on rtk.
+
+### curl examples
+
+```sh
+curl -s localhost:8787/v1/fairbridge/info -H "Authorization: Bearer $T" -d '{}'
+
+curl -s localhost:8787/v1/fairbridge/read -H "Authorization: Bearer $T" \
+  -d '{"limit": 20, "days": 7}'
+
+# only works once FAIRBRIDGE_WRITE_ENABLED=true
+curl -s localhost:8787/v1/fairbridge/send -H "Authorization: Bearer $T" \
+  -d '{"text": "running late, be there in 10"}'
 ```
 
 ## MCP mount

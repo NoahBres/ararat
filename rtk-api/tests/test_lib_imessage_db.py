@@ -6,6 +6,7 @@ import pytest
 from conftest_imessage import build_chat_db
 
 from rtk_api.lib import imessage_db
+from rtk_api.lib.imessage_db import decode_attributed_body
 
 
 @pytest.fixture()
@@ -139,3 +140,21 @@ def test_find_recent_outbound_no_match_returns_none(chat_db):
     since = datetime.now(UTC) - timedelta(days=4)
     found = imessage_db.find_recent_outbound("+15551234567", "not a real message", since=since)
     assert found is None
+
+
+def test_decode_attributed_body_strips_whitespace_valued_length_byte():
+    """The byte after the "+" marker is a length, not text -- including when
+    its value happens to be whitespace.
+
+    A 10-character message encodes its length as 0x0A. Stripping the marker
+    with `^\\+[^\\s]` refused to match that, leaving "+\\n" glued to the front
+    of every such message -- visible in read output, and enough to make
+    `find_recent_outbound_in_chat` miss its own just-sent message and report
+    a successful send as "unconfirmed". Bytes below are a real outbound row.
+    """
+    blob = bytes.fromhex(
+        "040b73747265616d747970656481e803840140848484124e5341747472696275746564"
+        "537472696e67008484084e534f626a656374008592848484084e53537472696e670194"
+        "84012b0a5b424f545d2074657374"
+    )
+    assert decode_attributed_body(blob) == "[BOT] test"

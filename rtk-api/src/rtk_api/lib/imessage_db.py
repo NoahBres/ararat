@@ -94,7 +94,11 @@ def _clean(s: str) -> str:
     """Strip NSArchiver artifacts from a decoded string."""
     s = _BPLIST_TAIL.sub("", s)
     s = re.sub(r"\s*\|\s*$", "", s)
-    s = re.sub(r"^\+[^\s]", "", s)  # leading NSArchiver object-ref marker
+    # Leading NSArchiver marker: "+" followed by a one-byte length. Matched
+    # with DOTALL rather than `[^\s]` because that length byte is often a
+    # whitespace *value* -- a 10-character message encodes as 0x0A, which
+    # `[^\s]` refuses to match, leaving "+\n" glued to the front of the text.
+    s = re.sub(r"^\+.", "", s, flags=re.DOTALL)
     return s.strip()
 
 

@@ -197,3 +197,28 @@ def lookup_name(identifier: str) -> str | None:
         if c["email"] and c["email"].lower() == norm:
             return c["name"]
     return None
+
+
+def annotate_senders(rows: list[dict]) -> list[dict]:
+    """Add a `sender_name` to each message row, resolved from `sender`.
+
+    Mutates and returns `rows`. Results are cached per call, since a message
+    list is usually dominated by a handful of distinct senders and
+    `lookup_name` rescans the whole AddressBook each time. "me" and a missing
+    sender resolve to None (an outbound message has no sender handle), and a
+    lookup that blows up -- unreadable AddressBook, say -- degrades to None
+    rather than failing the whole read.
+    """
+    cache: dict[str | None, str | None] = {}
+    for row in rows:
+        sender = row.get("sender")
+        if sender not in cache:
+            if not sender or sender == "me":
+                cache[sender] = None
+            else:
+                try:
+                    cache[sender] = lookup_name(sender)
+                except Exception:
+                    cache[sender] = None
+        row["sender_name"] = cache[sender]
+    return rows

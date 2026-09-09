@@ -34,25 +34,6 @@ end run
 """
 
 
-def _resolve_sender_name(identifier: str | None) -> str | None:
-    if not identifier or identifier == "me":
-        return None
-    try:
-        return contacts.lookup_name(identifier)
-    except Exception:
-        return None
-
-
-def _enrich_with_sender_names(rows: list[dict]) -> list[dict]:
-    cache: dict[str | None, str | None] = {}
-    for row in rows:
-        sender = row.get("sender")
-        if sender not in cache:
-            cache[sender] = _resolve_sender_name(sender)
-        row["sender_name"] = cache[sender]
-    return rows
-
-
 @tool("imessage.chats")
 def chats(limit: int = 50) -> list[dict]:
     """List recent iMessage/SMS chats: chat id (guid), display name or
@@ -63,7 +44,7 @@ def chats(limit: int = 50) -> list[dict]:
 @tool("imessage.recent")
 def recent(limit: int = 50, days: int = 7) -> list[dict]:
     """Newest messages across all chats in the last `days` days."""
-    return _enrich_with_sender_names(imessage_db.recent_messages(limit=limit, days=days))
+    return contacts.annotate_senders(imessage_db.recent_messages(limit=limit, days=days))
 
 
 @tool("imessage.with_contact")
@@ -82,19 +63,19 @@ def with_contact(
     rows = imessage_db.messages_with_identifiers(
         identifiers, days=days, limit=limit, keyword=keyword
     )
-    return _enrich_with_sender_names(rows)
+    return contacts.annotate_senders(rows)
 
 
 @tool("imessage.search")
 def search(query: str, days: int = 365, limit: int = 50) -> list[dict]:
     """Search message bodies for `query` over the last `days` days."""
-    return _enrich_with_sender_names(imessage_db.search_messages(query, days=days, limit=limit))
+    return contacts.annotate_senders(imessage_db.search_messages(query, days=days, limit=limit))
 
 
 @tool("imessage.unread")
 def unread(limit: int = 50) -> list[dict]:
     """Unread inbound messages (is_read=0, is_from_me=0)."""
-    return _enrich_with_sender_names(imessage_db.unread_messages(limit=limit))
+    return contacts.annotate_senders(imessage_db.unread_messages(limit=limit))
 
 
 def _resolve_send_target(to: str) -> str:

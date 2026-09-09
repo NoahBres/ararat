@@ -123,6 +123,11 @@ def send(to: str, text: str) -> dict:
     if imessage_db.is_group_identifier(identifier):
         raise ValueError("refusing to send to a group chat")
 
+    # Captured *before* the send, not after: Messages usually writes the
+    # chat.db row during the osascript call, so a timestamp taken afterwards
+    # sits past the row's own date and the `m.date >= since` filter excludes
+    # the very message we're trying to confirm.
+    sent_at = datetime.now(UTC)
     result = subprocess.run(
         ["osascript", "-e", _SEND_SCRIPT, identifier, text],
         capture_output=True,
@@ -132,7 +137,6 @@ def send(to: str, text: str) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"osascript send failed: {result.stderr.strip()}")
 
-    sent_at = datetime.now(UTC)
     confirmed_rowid = None
     deadline = time.monotonic() + _SEND_POLL_TIMEOUT_S
     while time.monotonic() < deadline:

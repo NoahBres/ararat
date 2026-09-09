@@ -125,13 +125,19 @@ to hand a new agent as its starting point -- point it at
 `https://api.noahbres.com/v1/help` with its credentials and it can discover
 everything else itself.
 
-**`require_approval` is not implemented yet.** It is checked *before* `allow`
-and overrides it, so listing a tool there gates it out of a broader grant.
-The intended mechanism is a human-in-the-loop approval queue -- the tool
+**`require_approval` marks tools for auditing, not for blocking.** A tool
+listed there is callable, and every call is written to the audit log as
+`approval.auto_granted` with its arguments, plus a warning on the server log.
+It is asked only of calls `allow` already permits, so it cannot widen a grant.
+
+The intended mechanism is still a human-in-the-loop approval queue -- the tool
 returns `202` with an `approval_id`, a dedicated Telegram bot DMs an
-Allow/Deny prompt, and the caller polls for the decision. Until that ships, a
-tool matching `require_approval` is refused with a 403 rather than allowed
-through unattended. See `notes/NOTES.md` for the full design.
+Allow/Deny prompt, and the caller polls for the decision. Until that ships,
+`approvals.request_approval` grants and records. It used to refuse instead,
+which made the list unusable: nothing could ever be approved, so listing a
+tool meant "never", and the resulting 403 was indistinguishable from a scoping
+mistake. When the queue lands, that one function consults it and returns its
+decision -- callers are unchanged. See `notes/NOTES.md` for the full design.
 
 **The MCP mount is not scoped.** `_build_mcp_app` registers the entire
 registry and the `/<secret>/` path short-circuits every check above, so

@@ -24,6 +24,7 @@ from rtk_api import __version__
 
 # Import side effect: populates rtk_api.registry.REGISTRY.
 from rtk_api import tools as _tools  # noqa: F401
+from rtk_api.approvals import request_approval
 from rtk_api.audit import audit_log
 from rtk_api.auth import AuthMiddleware, Principal, redact_path
 from rtk_api.config import get_settings
@@ -111,22 +112,20 @@ def _build_mcp_app(settings):
 
 def _callable_tools(principal: Principal | None) -> list[ToolSpec]:
     """Tools this principal may actually invoke right now: unscoped (owner /
-    mcp) sees everything, a scoped client sees only what `allow` grants and
-    `require_approval` doesn't currently block. Shared by /v1/tools and
-    /v1/help so the two surfaces can never drift apart.
+    mcp) sees everything, a scoped client sees what `allow` grants. Shared by
+    /v1/tools and /v1/help so the two surfaces can never drift apart.
+
+    `require_approval` no longer subtracts from this list -- those tools are
+    callable, just audited (see `approvals.py`), so hiding them would
+    misrepresent what the caller can do.
     """
-    return [
-        spec
-        for spec in REGISTRY.values()
-        if principal is None
-        or (principal.permits(spec.name) and not principal.needs_approval(spec.name))
-    ]
+    return [spec for spec in REGISTRY.values() if principal is None or principal.permits(spec.name)]
 
 
-def _gated_tools(principal: Principal | None) -> list[ToolSpec]:
-    """Tools within this principal's grant that are currently refused pending
-    the approval queue -- worth telling the caller about explicitly rather
-    than letting them discover it as an opaque 403.
+def _audited_tools(principal: Principal | None) -> list[ToolSpec]:
+    """Tools in this principal's grant that match `require_approval`. They are
+    callable, but every call is recorded -- worth saying plainly rather than
+    letting the caller assume nobody is looking.
     """
     if principal is None:
         return []
@@ -204,7 +203,7 @@ def _render_help_markdown(principal: Principal | None, *, base_url: str) -> str:
     lines.append("")
 
     callable_tools = sorted(_callable_tools(principal), key=lambda s: s.name)
-    gated_tools = sorted(_gated_tools(principal), key=lambda s: s.name)
+    audited_tools = sorted(_audited_tools(principal), key=lambda s: s.name)
 
     if not callable_tools:
         lines.append(
@@ -231,19 +230,18 @@ def _render_help_markdown(principal: Principal | None, *, base_url: str) -> str:
         lines.append("```")
         lines.append("")
 
-    if gated_tools:
-        lines.append("## Gated (need approval -- not usable unattended yet)")
+    if audited_tools:
+        lines.append("## Audited")
         lines.append("")
         lines.append(
-            "These are in your grant but currently refused with a 403: they match a "
-            "`require_approval` rule and the human-in-the-loop approval queue isn't "
-            "built yet, so there is no way to get them approved unattended."
+            "These are callable like anything else above, but they match a "
+            "`require_approval` rule, so every call is written to the server's audit "
+            "log with its arguments and reviewed after the fact. Nothing blocks them "
+            "and nothing prompts -- treat them as actions someone will read back."
         )
         lines.append("")
-        for spec in gated_tools:
-            lines.append(
-                f"- `{spec.name}`" + (f" -- {spec.description}" if spec.description else "")
-            )
+        for spec in audited_tools:
+            lines.append(f"- `{spec.name}`")
         lines.append("")
 
     lines.append("## Machine-readable schema")
@@ -346,21 +344,11 @@ def create_app() -> FastAPI:
         # Authorize before the 404 so a scoped client can't enumerate which
         # tools exist outside its grant.
         #
-        # Approval is checked first, and deliberately overrides `allow`: a
-        # tool listed in `require_approval` is gated even if an `allow`
-        # pattern also matches it. Placeholder for the human-in-the-loop
-        # approval queue -- until that ships, such a tool is refused rather
-        # than allowed through unattended.
-        if principal is not None and principal.needs_approval(full_name):
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "error": f"{full_name!r} requires approval, and the approval "
-                    "backend is not implemented yet",
-                },
-                status_code=403,
-            )
-
+        # `require_approval` no longer refuses here. It routes through
+        # `approvals.request_approval` further down -- after the body is
+        # parsed, so the audit record carries the actual arguments. Still
+        # requires `allow`: approval is a second question asked of calls that
+        # are already permitted, not a way around scoping.
         if principal is not None and not principal.permits(full_name):
             return JSONResponse(
                 {"ok": False, "error": f"forbidden: {principal.name} may not call {full_name!r}"},
@@ -394,8 +382,17 @@ def create_app() -> FastAPI:
                 )
             kwargs = parsed
 
+        principal_name = principal.name if principal else None
+
+        if principal is not None and principal.needs_approval(full_name):
+            if not request_approval(full_name, principal_name, kwargs):
+                return JSONResponse(
+                    {"ok": False, "error": f"{full_name!r} was not approved"},
+                    status_code=403,
+                )
+
         if spec.write:
-            audit_log(full_name, principal.name if principal else None, kwargs)
+            audit_log(full_name, principal_name, kwargs)
 
         try:
             # Tools are sync and may block on disk / subprocesses / TCC prompts;

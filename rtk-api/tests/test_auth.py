@@ -20,8 +20,9 @@ def _client(monkeypatch, **env):
     return TestClient(create_app())
 
 
-#: A client scoped the way `instinct` will be: all of Things, iMessage reads,
-#: and `imessage.send` reserved for the not-yet-built approval queue.
+#: A client scoped the way `instinct` is: all of Things, iMessage reads, and
+#: `imessage.send` marked for auditing via `require_approval` -- note it is
+#: deliberately absent from `allow`, so it is refused on scope, not approval.
 INSTINCT = {
     "instinct": {
         "token": "instinct-token",
@@ -224,7 +225,9 @@ def test_client_denied_outside_allowlist(monkeypatch):
     assert "instinct" in resp.json()["error"]
 
 
-def test_client_denied_for_approval_gated_tool(monkeypatch):
+def test_approval_does_not_substitute_for_allow(monkeypatch):
+    """`require_approval` is asked only of calls `allow` already permits, so
+    listing a tool there must not smuggle it into a grant that omits it."""
     client = _client(monkeypatch, clients=INSTINCT)
     resp = client.post(
         "/v1/imessage/send",
@@ -232,7 +235,64 @@ def test_client_denied_for_approval_gated_tool(monkeypatch):
         json={"to": "+15555550123", "text": "hi"},
     )
     assert resp.status_code == 403
-    assert "approval" in resp.json()["error"]
+    assert "may not call" in resp.json()["error"]
+
+
+#: instinct, but with the audited tool actually inside the grant.
+INSTINCT_WITH_SEND = {
+    "instinct": {
+        **INSTINCT["instinct"],
+        "allow": [*INSTINCT["instinct"]["allow"], "imessage.send"],
+    }
+}
+
+
+def test_approval_gated_call_is_let_through_and_audited(monkeypatch):
+    """The approval queue isn't built, so `request_approval` grants -- but the
+    call must be recorded with its arguments before it runs."""
+    entries = []
+    monkeypatch.setattr(
+        "rtk_api.approvals.audit_log",
+        lambda tool, principal, args, event="write": entries.append((event, tool, principal, args)),
+    )
+    monkeypatch.setattr("rtk_api.app.audit_log", lambda *a, **k: None)
+    monkeypatch.setenv("IMESSAGE_WRITE_ENABLED", "false")
+
+    client = _client(monkeypatch, clients=INSTINCT_WITH_SEND)
+    resp = client.post(
+        "/v1/imessage/send",
+        headers={"X-Rtk-Client-Token": "instinct-token"},
+        json={"to": "+15555550123", "text": "hi"},
+    )
+
+    assert entries == [
+        (
+            "approval.auto_granted",
+            "imessage.send",
+            "instinct",
+            {"to": "+15555550123", "text": "hi"},
+        )
+    ]
+    # It reached the tool: this 403 is the write kill switch, not the gate.
+    assert resp.status_code == 403
+    assert "approval" not in resp.json()["error"]
+
+
+def test_approval_gated_tool_is_listed_as_callable(monkeypatch):
+    client = _client(monkeypatch, clients=INSTINCT_WITH_SEND)
+    resp = client.get("/v1/tools", headers={"X-Rtk-Client-Token": "instinct-token"})
+    assert "imessage.send" in {tool["name"] for tool in resp.json()["result"]}
+
+
+def test_ungated_call_is_not_audited_as_approval(monkeypatch):
+    entries = []
+    monkeypatch.setattr(
+        "rtk_api.approvals.audit_log",
+        lambda tool, principal, args, event="write": entries.append(event),
+    )
+    client = _client(monkeypatch, clients=INSTINCT)
+    client.post("/v1/imessage/search", headers={"X-Rtk-Client-Token": "instinct-token"}, json={})
+    assert entries == []
 
 
 def test_unknown_tool_outside_grant_is_403_not_404(monkeypatch):
@@ -276,20 +336,14 @@ def test_help_doc_is_markdown_and_scoped_for_client(monkeypatch):
     assert "imessage.send" not in resp.text  # not in this fixture's `allow` at all
 
 
-def test_help_doc_lists_gated_tools_separately(monkeypatch):
-    gated_client = {
-        "instinct": {
-            **INSTINCT["instinct"],
-            "allow": [*INSTINCT["instinct"]["allow"], "imessage.send"],
-        }
-    }
-    client = _client(monkeypatch, clients=gated_client)
+def test_help_doc_lists_audited_tools_as_callable_and_flags_them(monkeypatch):
+    client = _client(monkeypatch, clients=INSTINCT_WITH_SEND)
     resp = client.get("/v1/help", headers={"X-Rtk-Client-Token": "instinct-token"})
     assert resp.status_code == 200
-    # in the grant but gated -- listed under "Gated", not as a callable tool
-    assert "### `imessage.send`" not in resp.text
-    assert "imessage.send" in resp.text
-    assert "Gated" in resp.text
+    # Callable, so it gets a full section with an example -- and is also named
+    # under "Audited" so the caller knows the call is recorded.
+    assert "### `imessage.send`" in resp.text
+    assert "## Audited" in resp.text
 
 
 def test_help_doc_json_negotiation(monkeypatch):

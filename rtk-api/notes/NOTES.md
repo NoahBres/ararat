@@ -340,3 +340,33 @@ no recipient parameter — the scoping *is* the safety property, and `RTK_API_CL
 may call it. A second gate per feature is env-file clutter that would grow with every tool.
 Unsetting `FAIRBRIDGE_PARTICIPANTS` still disables sending as a side effect (no chat resolves), so
 there is a rollback lever without a dedicated flag.
+
+### `require_approval` now grants and audits (2026-09-09)
+
+Noah: *"please just return true and pass it in. just ensure everything requiring approval is
+logged."* `require_approval` used to return a 403 for any matching tool. It now routes through
+`rtk_api/approvals.py::request_approval`, which returns True and records the call.
+
+The old behaviour made the list unusable rather than safe: with no queue to approve *through*,
+listing a tool meant "never", and its 403 read identically to a scoping mistake. It is now the
+answer to "which calls do I want a record of" instead of "which calls are blocked".
+
+What changed concretely:
+
+- **Ordering.** The check moved *after* `allow` and after the body parse. It used to run first and
+  override `allow`; it now only applies to calls that are already permitted, so listing a tool
+  under `require_approval` can never widen a grant. Parsing first means the audit record carries
+  the real arguments. Pinned by `test_approval_does_not_substitute_for_allow`.
+- **Audit.** `audit_log` grew an `event` field — `"write"` (default, unchanged shape otherwise)
+  and `"approval.auto_granted"`. A gated write emits both lines. Audit happens *before* the call,
+  so an attempt is recorded even if the tool then fails.
+- **Discovery.** These tools are no longer subtracted from `/v1/tools` or `/v1/help` — they are
+  callable, so hiding them misrepresented the grant. `/v1/help`'s "Gated" section became
+  "Audited", listing them alongside their normal callable entries.
+
+**Live consequence:** instinct's grant still omits `imessage.send` from `allow`, so it remains
+refused — on scope now, not approval. Nothing was silently un-gated by this change. `imessage.send`
+is additionally still behind `IMESSAGE_WRITE_ENABLED=false` and its recipient allowlist on rtk.
+
+The seam for the real queue is one function: make `request_approval` consult it and return the
+decision. A False return already produces a 403 (`"was not approved"`); no caller changes.

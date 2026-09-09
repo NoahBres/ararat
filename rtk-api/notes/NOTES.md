@@ -315,3 +315,19 @@ have polled for 3s and reported `"unconfirmed"`. Fixed in both `imessage.send` a
 `fairbridge.send` is the **first real send this codebase has ever done**. Regression test
 (`test_send_confirms_via_the_real_chat_db_query`) inserts the row mid-call against the real sqlite
 query rather than stubbing the lookup, and was verified to fail against the old ordering.
+
+**Deployed and verified live, 2026-09-09.** `rtk-api/deploy.sh --remote`; `~/.config/rtk-api/env`
+on rtk gained `FAIRBRIDGE_PARTICIPANTS` + `FAIRBRIDGE_WRITE_ENABLED=true`, and instinct's
+`RTK_API_CLIENTS` grant gained the three `fairbridge.*` names (env backed up to
+`env.bak-20260909-013302` first — `_parse_clients` fails closed, so a botched edit to that
+single-line JSON would silently drop *all* of instinct's tools while `/health` stayed green).
+Verified through the public URL with instinct's own credentials, not `/health`: `/v1/tools`
+returns the three new tools *and* still the full `things.*` + five iMessage reads;
+`/v1/fairbridge/info` resolves to rtk's own guid for the chat with the right three participants
+(291 msgs), confirming the participant-set resolution works across machines; `/v1/fairbridge/read`
+returns that chat only.
+
+**Still unverified: actual delivery.** `chat id "..."` was confirmed to *resolve* on rtk (returns
+the 3 participants), but `send theText to chat id theChatId` can only be tested by sending a real
+message to three real people — pending Noah's go-ahead on the wording. A `"sent": "confirmed"`
+response is also the empirical check on the timestamp fix above.

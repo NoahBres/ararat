@@ -71,12 +71,27 @@ def test_list_today_sorts_like_app(monkeypatch):
     # Library order is raw today_index ascending; the app groups by
     # todayIndexReferenceDate (newest first) then today_index ascending.
     fake_tasks = [
-        {"uuid": "old-first", "type": "to-do", "title": "old first",
-         "today_index": -300, "start_date": "2026-09-04"},
-        {"uuid": "new-second", "type": "to-do", "title": "new second",
-         "today_index": -200, "start_date": "2026-09-04"},
-        {"uuid": "new-first", "type": "to-do", "title": "new first",
-         "today_index": -100, "start_date": "2026-09-07"},
+        {
+            "uuid": "old-first",
+            "type": "to-do",
+            "title": "old first",
+            "today_index": -300,
+            "start_date": "2026-09-04",
+        },
+        {
+            "uuid": "new-second",
+            "type": "to-do",
+            "title": "new second",
+            "today_index": -200,
+            "start_date": "2026-09-04",
+        },
+        {
+            "uuid": "new-first",
+            "type": "to-do",
+            "title": "new first",
+            "today_index": -100,
+            "start_date": "2026-09-07",
+        },
     ]
     refs = {"old-first": 100, "new-second": 200, "new-first": 200}
     monkeypatch.setattr(things_tools.things_lib, "today", lambda: list(fake_tasks))

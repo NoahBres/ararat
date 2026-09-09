@@ -241,7 +241,9 @@ def _render_help_markdown(principal: Principal | None, *, base_url: str) -> str:
         )
         lines.append("")
         for spec in gated_tools:
-            lines.append(f"- `{spec.name}`" + (f" -- {spec.description}" if spec.description else ""))
+            lines.append(
+                f"- `{spec.name}`" + (f" -- {spec.description}" if spec.description else "")
+            )
         lines.append("")
 
     lines.append("## Machine-readable schema")
@@ -263,7 +265,7 @@ def _render_help_markdown(principal: Principal | None, *, base_url: str) -> str:
         lines.append(
             "**Scope note:** you are a scoped client. Tools outside your grant are "
             "invisible here and on `/v1/tools`, and calling one directly returns 403 "
-            "rather than 404 -- so a 403 on an unlisted tool means \"not yours\", not "
+            'rather than 404 -- so a 403 on an unlisted tool means "not yours", not '
             '"typo".'
         )
         lines.append("")

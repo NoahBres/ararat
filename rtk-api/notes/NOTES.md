@@ -296,8 +296,11 @@ with `-1728`; the bare `chat id "..."` form works. Guid and text go through `on 
 interpolated into the script. Confirmation polls chat.db scoped to the chat guid — the 1:1
 `find_recent_outbound` joins through a single handle and can't see a group send.
 
-**Automation TCC is already granted on rtk** (verified 2026-09-09 by enumerating `text chats` over
-SSH — it returned data, not a permission error), so the first send won't block on a GUI prompt.
+**Automation TCC was NOT granted on rtk — that check was wrong.** Enumerating `text chats` over
+SSH returned data, and it was read as proof the service could drive Messages. It isn't: TCC keys
+Automation grants by *responsible process*, and an SSH command's is `sshd-keygen-wrapper`, which
+does have the grant. The launchd service is a different client (`com.noahbres.rtk-api`) with its
+own entry. See the correction below.
 
 `FAIRBRIDGE_PARTICIPANTS` has no default in code on purpose — three real phone numbers, public
 repo. It lives only in `~/.config/rtk-api/env` on rtk. Unset, the tools refuse.
@@ -370,3 +373,36 @@ is additionally still behind `IMESSAGE_WRITE_ENABLED=false` and its recipient al
 
 The seam for the real queue is one function: make `request_approval` consult it and return the
 decision. A False return already produces a 403 (`"was not approved"`); no caller changes.
+
+### Automation TCC: the first real sends failed (2026-09-09)
+
+instinct called `fairbridge.send` twice at 08:49 UTC. Both took **exactly 15070ms** — the
+`subprocess.run(timeout=15)` — and returned a generic 500. Neither message reached the chat.
+
+Cause: `TCC.db` has `com.noahbres.rtk-api | kTCCServiceAppleEvents | com.apple.MobileSMS` with
+`auth_value=0` (**denied**), `last_modified` 08:51:36 — i.e. the modal Automation prompt appeared
+on rtk's screen at 08:49, nobody was there, and macOS recorded a denial two minutes later.
+
+**The earlier "already granted" check was measuring the wrong thing.** Automation grants are keyed
+by responsible process. Enumerating `text chats` over SSH exercised `sshd-keygen-wrapper`
+(`auth_value=2`), not the service. The TCC table makes the distinction plain:
+
+```
+/usr/bin/python3              | com.apple.MobileSMS | 2   <- things-today-tracker
+/usr/libexec/sshd-keygen-wrapper | com.apple.MobileSMS | 2   <- ad-hoc ssh, what got tested
+com.noahbres.trash-reminder   | com.apple.MobileSMS | 2
+com.noahbres.rtk-api          | com.apple.MobileSMS | 0   <- the service, DENIED
+```
+
+Generalisable: **an ad-hoc SSH test can never establish what a launchd service is permitted to do.**
+Check `TCC.db` for the service's own bundle id, or exercise the service itself.
+
+**Fix (needs Noah at rtk's screen):** System Settings > Privacy & Security > Automation > rtk-api >
+enable Messages. If the toggle is absent, `tccutil reset AppleEvents com.noahbres.rtk-api` clears
+the recorded denial so the prompt fires again on the next send — which must be triggered while
+watching over Screen Sharing, since it times back into a denial if unanswered.
+
+**Also fixed in code:** a hung `osascript` (timeout) or an error containing `-1743` /
+"Not authorized to send Apple events" now raises `PermissionError` carrying the exact remediation
+steps, surfaced to the caller as a 403 — instead of a 15-second wait ending in an opaque
+`{"error": "internal error"}`. Applied to `imessage.send` as well, which has the same path.

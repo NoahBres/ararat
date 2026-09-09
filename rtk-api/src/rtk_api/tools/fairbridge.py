@@ -53,6 +53,22 @@ end run
 """
 
 
+#: macOS AppleScript error for "Not authorized to send Apple events".
+_TCC_DENIED_MARKERS = ("-1743", "Not authorized to send Apple events")
+
+_AUTOMATION_HELP = (
+    "Messages.app refused Apple events from rtk-api. macOS needs Automation "
+    "permission for the rtk-api process to control Messages: on rtk, System "
+    "Settings > Privacy & Security > Automation > rtk-api > enable Messages. "
+    "If rtk-api isn't listed, or was previously denied, reset the prompt with "
+    "`tccutil reset AppleEvents com.noahbres.rtk-api`, then trigger a send "
+    "while watching rtk's screen (Screen Sharing) and click Allow -- the "
+    "prompt is modal on that machine and times out into a denial if nobody "
+    "answers. Granting this to an SSH session is a *different* TCC entry "
+    "(sshd-keygen-wrapper) and does not cover the service."
+)
+
+
 def _resolve_chat() -> dict:
     """The Fairbridge chat as it exists in *this* machine's chat.db.
 
@@ -119,14 +135,24 @@ def send(text: str) -> dict:
     # sits past the row's own date and the `m.date >= since` filter excludes
     # the very message we're trying to confirm.
     sent_at = datetime.now(UTC)
-    result = subprocess.run(
-        ["osascript", "-e", _SEND_SCRIPT, chat["chat_guid"], text],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", _SEND_SCRIPT, chat["chat_guid"], text],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # osascript blocking this long means Messages never answered --
+        # almost always the modal Automation prompt sitting unanswered on
+        # rtk's screen, which macOS then records as a denial.
+        raise PermissionError(_AUTOMATION_HELP) from exc
+
     if result.returncode != 0:
-        raise RuntimeError(f"osascript send failed: {result.stderr.strip()}")
+        stderr = result.stderr.strip()
+        if any(marker in stderr for marker in _TCC_DENIED_MARKERS):
+            raise PermissionError(_AUTOMATION_HELP)
+        raise RuntimeError(f"osascript send failed: {stderr}")
 
     confirmed_rowid = None
     deadline = time.monotonic() + _SEND_POLL_TIMEOUT_S

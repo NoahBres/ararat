@@ -235,3 +235,40 @@ def test_send_is_registered_as_a_write_tool():
     assert REGISTRY["fairbridge.send"].write is True
     assert REGISTRY["fairbridge.read"].write is False
     assert REGISTRY["fairbridge.info"].write is False
+
+
+def test_send_reports_automation_denial_on_timeout(chat_db, configured, monkeypatch):
+    """A hung osascript is the unanswered Automation prompt, not a mystery.
+
+    It surfaced in production as a generic 500 after exactly 15s, which said
+    nothing about the actual fix.
+    """
+
+    def hang(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 15)
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    with pytest.raises(PermissionError, match="Automation"):
+        fb.send("hello")
+
+
+def test_send_reports_automation_denial_on_error_1743(chat_db, configured, monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **k: subprocess.CompletedProcess(
+            argv, 1, "", "execution error: Not authorized to send Apple events (-1743)"
+        ),
+    )
+    with pytest.raises(PermissionError, match="Automation"):
+        fb.send("hello")
+
+
+def test_send_still_reports_other_osascript_failures_verbatim(chat_db, configured, monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "some other failure"),
+    )
+    with pytest.raises(RuntimeError, match="some other failure"):
+        fb.send("hello")

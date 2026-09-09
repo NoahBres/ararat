@@ -39,9 +39,8 @@ def no_contacts(monkeypatch):
 
 @pytest.fixture()
 def configured(monkeypatch):
-    """Participants set, writes off -- the safe default state."""
+    """Participants configured -- the normal state."""
     monkeypatch.setenv("FAIRBRIDGE_PARTICIPANTS", FAIRBRIDGE_THREE)
-    monkeypatch.setenv("FAIRBRIDGE_WRITE_ENABLED", "false")
     get_settings.cache_clear()
 
 
@@ -119,20 +118,24 @@ def test_read_enriches_sender_names(chat_db, configured, monkeypatch):
     assert next(r for r in rows if r["is_from_me"])["sender_name"] is None
 
 
-def test_info_reports_target_and_write_state(chat_db, configured, no_contacts):
+def test_info_reports_target(chat_db, configured, no_contacts):
     result = fb.info()
     assert result["chat_guid"] == "chat-guid-104"
-    assert result["write_enabled"] is False
     assert result["message_count"] == 2
 
 
 # ---- send ------------------------------------------------------------------
 
 
-def test_send_refuses_when_disabled(chat_db, configured, monkeypatch):
+def test_send_refuses_when_participants_unconfigured(chat_db, monkeypatch):
+    """With no configured chat there is nothing to send to, and that is now
+    the only thing standing between a call and a real message -- there is no
+    separate kill switch."""
+    monkeypatch.setenv("FAIRBRIDGE_PARTICIPANTS", "")
+    get_settings.cache_clear()
     called = []
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: called.append(a))
-    with pytest.raises(PermissionError, match="FAIRBRIDGE_WRITE_ENABLED"):
+    with pytest.raises(PermissionError, match="FAIRBRIDGE_PARTICIPANTS"):
         fb.send("hello")
     assert called == []
 
@@ -143,13 +146,7 @@ def test_send_takes_no_recipient_parameter():
     assert set(schema["properties"]) == {"text"}
 
 
-def _enable_writes(monkeypatch):
-    monkeypatch.setenv("FAIRBRIDGE_WRITE_ENABLED", "true")
-    get_settings.cache_clear()
-
-
 def test_send_targets_the_resolved_chat_guid(chat_db, configured, monkeypatch):
-    _enable_writes(monkeypatch)
     seen = {}
 
     def fake_run(argv, **kwargs):
@@ -177,7 +174,6 @@ def test_send_confirms_via_the_real_chat_db_query(chat_db, configured, monkeypat
     successful send reported as "unconfirmed" forever. The fake send below
     inserts the row mid-call, exactly as Messages does.
     """
-    _enable_writes(monkeypatch)
 
     def fake_run(argv, **kwargs):
         conn = sqlite3.connect(chat_db)
@@ -199,7 +195,6 @@ def test_send_confirms_via_the_real_chat_db_query(chat_db, configured, monkeypat
 
 def test_send_ignores_an_outbound_message_in_a_different_chat(chat_db, configured, monkeypatch):
     """Same text, same moment, wrong chat -- confirmation must not claim it."""
-    _enable_writes(monkeypatch)
 
     def fake_run(argv, **kwargs):
         conn = sqlite3.connect(chat_db)
@@ -219,7 +214,6 @@ def test_send_ignores_an_outbound_message_in_a_different_chat(chat_db, configure
 
 
 def test_send_rejects_empty_and_overlong_text(chat_db, configured, monkeypatch):
-    _enable_writes(monkeypatch)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not send"))
     with pytest.raises(ValueError, match="empty"):
         fb.send("   ")
@@ -228,7 +222,6 @@ def test_send_rejects_empty_and_overlong_text(chat_db, configured, monkeypatch):
 
 
 def test_send_raises_when_osascript_fails(chat_db, configured, monkeypatch):
-    _enable_writes(monkeypatch)
     monkeypatch.setattr(
         subprocess,
         "run",

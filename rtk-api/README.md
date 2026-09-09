@@ -35,7 +35,6 @@ still take precedence over that file.
 | `IMESSAGE_WRITE_ENABLED` | Kill switch for iMessage sends (Phase 3) | `false` |
 | `IMESSAGE_WRITE_ALLOWLIST` | Comma-separated identifiers allowed to receive sends (Phase 3) | empty |
 | `FAIRBRIDGE_PARTICIPANTS` | Comma-separated identifiers of the Fairbridge group chat's members; the `fairbridge.*` tools resolve their chat from this (see [Fairbridge](#fairbridge-one-group-chat)) | empty (tools refuse) |
-| `FAIRBRIDGE_WRITE_ENABLED` | Kill switch for `fairbridge.send`, independent of `IMESSAGE_WRITE_ENABLED` | `false` |
 | `RTK_API_HOST` | Bind host | `127.0.0.1` |
 | `RTK_API_PORT` | Bind port | `8787` |
 
@@ -379,9 +378,13 @@ guessing at a chat. Use `fairbridge.info` to confirm what they're pointed at.
 
 ### Sending
 
-`fairbridge.send` refuses unless `FAIRBRIDGE_WRITE_ENABLED=true` (its own kill
-switch, independent of `IMESSAGE_WRITE_ENABLED`), rejects empty text, and caps
-`text` at 2000 characters.
+`fairbridge.send` rejects empty text and caps `text` at 2000 characters.
+There is deliberately **no kill-switch env var**: unlike `imessage.send`,
+which can reach any allowlisted handle and needs a global off switch, this
+tool has one hardcoded destination and no recipient parameter. The scoping is
+the safety property, and the grant in `RTK_API_CLIENTS` is what decides who
+may call it. Unsetting `FAIRBRIDGE_PARTICIPANTS` disables it as a side effect,
+since there is then no chat to resolve.
 
 It sends via `osascript` with `on run argv`, so the chat guid and the text are
 passed as arguments and never interpolated into the AppleScript source. Note
@@ -402,7 +405,6 @@ curl -s localhost:8787/v1/fairbridge/info -H "Authorization: Bearer $T" -d '{}'
 curl -s localhost:8787/v1/fairbridge/read -H "Authorization: Bearer $T" \
   -d '{"limit": 20, "days": 7}'
 
-# only works once FAIRBRIDGE_WRITE_ENABLED=true
 curl -s localhost:8787/v1/fairbridge/send -H "Authorization: Bearer $T" \
   -d '{"text": "running late, be there in 10"}'
 ```

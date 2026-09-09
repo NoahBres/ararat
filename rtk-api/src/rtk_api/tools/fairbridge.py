@@ -86,11 +86,7 @@ def info() -> dict:
     participants, message count, and last activity. Read-only, and the way to
     confirm targeting before sending -- fairbridge.send takes no recipient,
     so this is the only place to check where it would go."""
-    chat = _resolve_chat()
-    return {
-        **chat,
-        "write_enabled": get_settings().fairbridge_write_enabled,
-    }
+    return _resolve_chat()
 
 
 @tool("fairbridge.read")
@@ -107,17 +103,9 @@ def read(limit: int = 30, days: int = 30) -> list[dict]:
 def send(text: str) -> dict:
     """Send a message to the Fairbridge group chat. Takes no recipient: the
     destination is fixed to the chat whose members are exactly
-    FAIRBRIDGE_PARTICIPANTS. Refuses unless FAIRBRIDGE_WRITE_ENABLED is set.
-    Caps `text` at 2000 characters. Sends via osascript (chat id and text
+    FAIRBRIDGE_PARTICIPANTS. Caps `text` at 2000 characters. Sends via osascript (chat id and text
     passed as argv, never interpolated into the script), then polls chat.db
     for ~3s to confirm the message actually landed in that chat."""
-    settings = get_settings()
-
-    if not settings.fairbridge_write_enabled:
-        raise PermissionError(
-            "Fairbridge sending is disabled (set FAIRBRIDGE_WRITE_ENABLED=true to enable)"
-        )
-
     if not text.strip():
         raise ValueError("text is empty")
 

@@ -317,7 +317,7 @@ have polled for 3s and reported `"unconfirmed"`. Fixed in both `imessage.send` a
 query rather than stubbing the lookup, and was verified to fail against the old ordering.
 
 **Deployed and verified live, 2026-09-09.** `rtk-api/deploy.sh --remote`; `~/.config/rtk-api/env`
-on rtk gained `FAIRBRIDGE_PARTICIPANTS` + `FAIRBRIDGE_WRITE_ENABLED=true`, and instinct's
+on rtk gained `FAIRBRIDGE_PARTICIPANTS`, and instinct's
 `RTK_API_CLIENTS` grant gained the three `fairbridge.*` names (env backed up to
 `env.bak-20260909-013302` first — `_parse_clients` fails closed, so a botched edit to that
 single-line JSON would silently drop *all* of instinct's tools while `/health` stayed green).
@@ -331,3 +331,12 @@ returns that chat only.
 the 3 participants), but `send theText to chat id theChatId` can only be tested by sending a real
 message to three real people — pending Noah's go-ahead on the wording. A `"sent": "confirmed"`
 response is also the empirical check on the timestamp fix above.
+
+**Kill switch removed, 2026-09-09** (Noah: "i dont really care about these flags. we'll just
+litter it"). `FAIRBRIDGE_WRITE_ENABLED` is gone from the code and from rtk's env. The reasoning
+holds up: `IMESSAGE_WRITE_ENABLED` earns its keep because `imessage.send` can reach any allowlisted
+handle, so a global off switch is meaningful. `fairbridge.send` has one hardcoded destination and
+no recipient parameter — the scoping *is* the safety property, and `RTK_API_CLIENTS` decides who
+may call it. A second gate per feature is env-file clutter that would grow with every tool.
+Unsetting `FAIRBRIDGE_PARTICIPANTS` still disables sending as a side effect (no chat resolves), so
+there is a rollback lever without a dedicated flag.

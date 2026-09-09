@@ -96,7 +96,6 @@ class Settings(BaseSettings):
     things_auth_token: str | None = Field(default=None)
     imessage_write_enabled: bool = Field(default=False)
     imessage_write_allowlist_raw: str = Field(default="", alias="imessage_write_allowlist")
-    fairbridge_write_enabled: bool = Field(default=False)
     fairbridge_participants_raw: str = Field(default="", alias="fairbridge_participants")
     rtk_api_host: str = Field(default="127.0.0.1")
     rtk_api_port: int = Field(default=8787)
